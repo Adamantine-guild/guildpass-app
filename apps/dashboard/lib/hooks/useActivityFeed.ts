@@ -1,76 +1,132 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type ActivityEvent } from "@guildpass/integration-client";
+import {
+  type ActivityEvent,
+  type ActivityEventEntity,
+  type ActivityEventSeverity,
+  type ActivityEventSource,
+  type ActivityEventType,
+} from "@guildpass/integration-client";
 import { fetchActivity, generateMockActivity } from "@/lib/mock-data";
 
 const REFRESH_MS =
   Number(process.env.NEXT_PUBLIC_ACTIVITY_REFRESH_MS) || 15_000;
 
 interface UseActivityFeedOptions {
-  /** How many events to surface at most (default: unlimited). */
+  /** Page size for API queries. Also caps non-paginated feeds. */
   limit?: number;
+  type?: ActivityEventType;
+  source?: ActivityEventSource;
+  severity?: ActivityEventSeverity;
+  entityType?: ActivityEventEntity["type"];
+  actor?: string;
+  from?: string;
+  paginate?: boolean;
+  poll?: boolean;
 }
 
 interface UseActivityFeedResult {
   events: ActivityEvent[];
   lastUpdated: Date | null;
   loading: boolean;
+  hasMore: boolean;
+  loadMore: () => Promise<void>;
 }
 
-export function useActivityFeed({ limit }: UseActivityFeedOptions = {}): UseActivityFeedResult {
+const MOCK_TYPE_MAP: Record<ReturnType<typeof generateMockActivity>["type"], ActivityEventType> = {
+  member_joined: "member.joined",
+  pass_created: "pass.created",
+  pass_purchased: "pass.purchased",
+  role_changed: "member.roles_changed",
+  access_granted: "access.granted",
+};
+
+export function useActivityFeed({
+  limit,
+  type,
+  source,
+  severity,
+  entityType,
+  actor,
+  from,
+  paginate = false,
+  poll = true,
+}: UseActivityFeedOptions = {}): UseActivityFeedResult {
   const [events, setEvents]           = useState<ActivityEvent[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading]         = useState(true);
-  const seenIds                       = useRef(new Set<string>());
+  const [nextCursor, setNextCursor]   = useState<string | null>(null);
+  const loadingMore                   = useRef(false);
 
-  const mergeEvents = useCallback((incoming: ActivityEvent[]) => {
-    const fresh = incoming.filter((e) => !seenIds.current.has(e.id));
-    if (fresh.length === 0) return;
-    fresh.forEach((e) => seenIds.current.add(e.id));
+  const mergeEvents = useCallback((incoming: ActivityEvent[], append: boolean) => {
     setEvents((prev) => {
-      const merged = [...fresh, ...prev].sort(
+      const base = append ? prev : [];
+      const seen = new Set(base.map((event) => event.id));
+      const fresh = incoming.filter((event) => !seen.has(event.id));
+      const merged = [...base, ...fresh].sort(
         (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       );
-      return limit ? merged.slice(0, limit) : merged;
+      return !paginate && limit ? merged.slice(0, limit) : merged;
     });
     setLastUpdated(new Date());
-  }, [limit]);
+  }, [limit, paginate]);
 
-  /** Single poll tick: fetch real/mock data + inject one simulated event in mock mode. */
-  const poll = useCallback(async () => {
+  const fetchPage = useCallback(async (cursor?: string, append = false) => {
+    setLoading(true);
     try {
-      const data = await fetchActivity();
-      mergeEvents(data);
-      // Simulate a new arriving event every tick in mock/dev mode
-      const mock = generateMockActivity();
-      // Convert old-style mock to new format for the hook
-      const convertedMock: ActivityEvent = {
-        id: mock.id,
-        type: "member.joined",
-        source: "dashboard",
-        severity: "info",
-        actor: {
-          name: mock.actor,
-        },
-        timestamp: mock.timestamp,
-        description: mock.description,
-      };
-      mergeEvents([convertedMock]);
+      const data = await fetchActivity({
+        limit,
+        cursor,
+        type,
+        source,
+        severity,
+        entityType,
+        actor,
+        from,
+      });
+      mergeEvents(data.events, append);
+      setNextCursor(data.nextCursor);
     } catch {
       // Silently swallow fetch errors; the feed keeps its last known state
     } finally {
       setLoading(false);
     }
-  }, [mergeEvents]);
+  }, [actor, entityType, from, limit, mergeEvents, severity, source, type]);
+
+  const pollFeed = useCallback(async () => {
+    await fetchPage(undefined, true);
+    if (paginate) return;
+
+    const mock = generateMockActivity();
+    mergeEvents([{
+      id: mock.id,
+      type: MOCK_TYPE_MAP[mock.type],
+      source: "dashboard",
+      severity: "info",
+      actor: { name: mock.actor },
+      timestamp: mock.timestamp,
+      description: mock.description,
+    }], true);
+  }, [fetchPage, mergeEvents, paginate]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore.current) return;
+    loadingMore.current = true;
+    await fetchPage(nextCursor, true);
+    loadingMore.current = false;
+  }, [fetchPage, nextCursor]);
 
   useEffect(() => {
-    // Initial load
-    poll();
+    setEvents([]);
+    setNextCursor(null);
+    setLoading(true);
+    pollFeed();
 
+    if (!poll) return;
     const tick = () => {
       // Pause polling while the tab is hidden to avoid wasted requests
-      if (document.visibilityState === "visible") poll();
+      if (document.visibilityState === "visible") pollFeed();
     };
 
     const id = setInterval(tick, REFRESH_MS);
@@ -80,7 +136,7 @@ export function useActivityFeed({ limit }: UseActivityFeedOptions = {}): UseActi
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [poll]);
+  }, [pollFeed, poll]);
 
-  return { events, lastUpdated, loading };
+  return { events, lastUpdated, loading, hasMore: nextCursor !== null, loadMore };
 }

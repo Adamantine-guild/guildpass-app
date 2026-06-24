@@ -3,7 +3,6 @@ import { verifySignature } from "@guildpass/webhook-utils";
 import { getEnv } from "@/lib/env";
 import { activityStorage } from "@/lib/activity/storage";
 import { ActivityEvent, WebhookPayload } from "@/lib/activity/types";
-import { activityService } from "@/lib/data/activity-service";
 
 export async function POST(req: NextRequest) {
   try {

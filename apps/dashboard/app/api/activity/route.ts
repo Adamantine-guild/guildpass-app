@@ -1,24 +1,13 @@
 import { NextResponse } from "next/server";
-import { handleApiError } from "@/lib/api-helpers";
-import { mockActivity } from "@/lib/mock-data";
-import { activityStorage } from "@/lib/activity/storage";
+import { apiError, handleApiError } from "@/lib/api-helpers";
+import { parseActivityQuery } from "@/lib/activity/query";
+import { activityService } from "@/lib/data/activity-service";
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: Request): Promise<NextResponse> {
+  const parsed = parseActivityQuery(new URL(request.url).searchParams);
+  if ("error" in parsed) return apiError(parsed.error, 400);
+
   return handleApiError(async () => {
-    try {
-      // Get real activities from storage
-      const realActivities = await activityStorage.getEvents();
-      
-      // Merge with mock data to keep the feed populated for now
-      // Real activities come first (they are newer)
-      const merged = [...realActivities, ...mockActivity].sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-
-      return merged;
-    } catch (error) {
-      console.error("Error fetching activity:", error);
-      return mockActivity;
-    }
+    return activityService.getEvents(parsed.query);
   });
 }

@@ -1,8 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert";
 import { generateSignature } from "@guildpass/webhook-utils";
-import { activityStorage } from "../lib/activity/storage";
-import { WebhookPayload } from "../lib/activity/types";
+import { activityStorage } from "../lib/activity/storage.ts";
 
 // Note: In a real Next.js environment, we'd use a more sophisticated test runner
 // but for this task, we're demonstrating the core logic verification.
@@ -49,19 +48,21 @@ describe("Webhook Ingestion", () => {
     const eventId = "duplicate_123";
     const event = {
       id: eventId,
-      type: "pass_created" as const,
+      type: "pass.created" as const,
+      source: "dashboard" as const,
+      severity: "info" as const,
       description: "Test Pass",
       timestamp: new Date().toISOString(),
-      actor: "Admin"
+      actor: { name: "Admin" },
     };
 
     await activityStorage.addEvent(event);
     const isDuplicate = await activityStorage.isDuplicate(eventId);
     assert.strictEqual(isDuplicate, true);
     
-    const countBefore = (await activityStorage.getEvents()).length;
+    const countBefore = (await activityStorage.getEvents()).events.length;
     await activityStorage.addEvent(event);
-    const countAfter = (await activityStorage.getEvents()).length;
+    const countAfter = (await activityStorage.getEvents()).events.length;
     
     assert.strictEqual(countBefore, countAfter);
   });

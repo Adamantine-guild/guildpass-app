@@ -1,5 +1,6 @@
-import { ActivityEvent, ActivityEventType, ActivityEventSource, ActivityEventSeverity } from "@guildpass/integration-client";
-import { activityStorage } from "../activity/storage";
+import type { ActivityEvent } from "@guildpass/integration-client";
+import { activityStorage } from "../activity/storage.ts";
+import type { ActivityQuery, ActivityQueryResult } from "../activity/types.ts";
 
 /**
  * Activity service for managing audit events
@@ -15,25 +16,15 @@ class ActivityService {
       timestamp: new Date().toISOString(),
     };
 
-    await activityStorage.addEvent(fullEvent as any);
+    await activityStorage.addEvent(fullEvent);
     return fullEvent;
   }
 
   /**
-   * Get all activity events
+   * Get activity events with bounded pagination and filters.
    */
-  async getEvents(options?: { limit?: number; type?: ActivityEventType }): Promise<ActivityEvent[]> {
-    let events = await activityStorage.getEvents() as ActivityEvent[];
-    
-    if (options?.type) {
-      events = events.filter(e => e.type === options.type);
-    }
-    
-    if (options?.limit) {
-      events = events.slice(0, options.limit);
-    }
-    
-    return events;
+  async getEvents(query?: ActivityQuery): Promise<ActivityQueryResult> {
+    return activityStorage.getEvents(query);
   }
 
   /**

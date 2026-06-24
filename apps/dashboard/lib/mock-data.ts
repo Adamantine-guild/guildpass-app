@@ -1,3 +1,6 @@
+import type { ActivityEvent } from "@guildpass/integration-client";
+import type { ActivityQuery, ActivityQueryResult } from "./activity/types.ts";
+
 export interface Pass {
   id: string;
   name: string;
@@ -92,14 +95,40 @@ export function generateMockActivity(): Activity {
   };
 }
 
+function mockToActivityEvent(activity: Activity): ActivityEvent {
+  const typeMap: Record<Activity["type"], ActivityEvent["type"]> = {
+    member_joined: "member.joined",
+    pass_created: "pass.created",
+    pass_purchased: "pass.purchased",
+    role_changed: "member.roles_changed",
+    access_granted: "access.granted",
+  };
+
+  return {
+    id: activity.id,
+    type: typeMap[activity.type],
+    source: "dashboard",
+    severity: "info",
+    actor: { name: activity.actor },
+    timestamp: activity.timestamp,
+    description: activity.description,
+  };
+}
+
 /** Simulates fetching the latest activity list (mock API call). */
-export async function fetchActivity(): Promise<Activity[]> {
+export async function fetchActivity(query: ActivityQuery = {}): Promise<ActivityQueryResult> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+
   try {
-    const response = await fetch("/api/activity");
+    const response = await fetch(`/api/activity?${params.toString()}`);
     if (!response.ok) throw new Error("Failed to fetch activity");
-    return response.json();
+    const data = await response.json();
+    return Array.isArray(data) ? { events: data, nextCursor: null } : data;
   } catch (error) {
     console.warn("Using fallback mock data due to fetch error:", error);
-    return Promise.resolve([...mockActivity]);
+    return { events: mockActivity.map(mockToActivityEvent), nextCursor: null };
   }
 }
