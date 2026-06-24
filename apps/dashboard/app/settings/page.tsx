@@ -24,7 +24,7 @@ import { canEditSettings } from "@/lib/permissions";
 
 export default function SettingsPage() {
   const session = useSession();
-  const canEdit = canEditSettings(session);
+  const canEdit = session ? canEditSettings(session) : false;
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -128,7 +128,7 @@ export default function SettingsPage() {
                 <input
                   id="display-name"
                   type="text"
-                  defaultValue={session.name}
+                  defaultValue={session?.name ?? ""}
                   disabled={!canEdit}
                   className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
                       ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"

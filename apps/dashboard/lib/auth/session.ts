@@ -165,3 +165,34 @@ export const MOCK_SESSION: Session = MOCK_SESSIONS[MOCK_ACTIVE_ROLE];
  */
 export const MOCK_API_ROLE: Role = MOCK_ACTIVE_ROLE;
 export const MOCK_API_SESSION: Session = MOCK_SESSIONS[MOCK_API_ROLE];
+
+// ── Mock admin mode (local development) ──────────────────────────────────────
+
+/**
+ * Enables mock admin access for local development.
+ * Set NEXT_PUBLIC_MOCK_ADMIN=true in apps/dashboard/.env.local and restart
+ * the dev server. Management pages will be accessible using MOCK_SESSION.
+ *
+ * When false (default), getSession() returns null — simulating an
+ * unauthenticated visitor who is blocked by the AdminGuard.
+ *
+ * This constant is intentionally public (NEXT_PUBLIC_*) so the same flag
+ * works in both server and client components without duplication.
+ */
+export const MOCK_ADMIN_MODE: boolean =
+  process.env.NEXT_PUBLIC_MOCK_ADMIN === "true";
+
+/**
+ * Returns the current session, or null when no authenticated user is present.
+ *
+ * In production, replace the body with a real auth call:
+ *   - next-auth:  const s = await getServerSession(authOptions); return s?.user ?? null;
+ *   - JWT/cookie: decode and verify the token from the incoming request headers.
+ *   - SIWE:       resolve the signed-in wallet address from the session store.
+ *
+ * The rest of the codebase (AdminGuard, useSession) imports from here, so
+ * swapping auth providers requires changing only this function.
+ */
+export function getSession(): Session | null {
+  return MOCK_ADMIN_MODE ? MOCK_SESSION : null;
+}

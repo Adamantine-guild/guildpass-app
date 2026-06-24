@@ -3,21 +3,23 @@
 /**
  * lib/hooks/useSession.ts
  *
- * Client-side hook that returns the current user session.
+ * Client-side hook that returns the current user session, or null when the
+ * visitor is unauthenticated.
  *
- * Currently wraps the mock session so all client components can be migrated
- * to real authentication by changing this single file.
+ * Components that need to enforce access should use AdminGuard rather than
+ * branching on the return value directly — AdminGuard is the single place
+ * that renders the access-denied state.
  *
  * ⚠️  Production migration: Replace the return statement with a real auth
  *     SDK hook, e.g.:
  *       const { data: session } = useNextAuthSession();
- *       return session?.user as Session;
+ *       return (session?.user as Session) ?? null;
  */
 
-import { MOCK_SESSION, type Session } from "@/lib/auth/session";
+import { getSession, type Session } from "@/lib/auth/session";
 
-export function useSession(): Session {
+export function useSession(): Session | null {
   // TODO: Replace with real auth provider hook when backend auth is ready.
-  // The rest of the codebase imports from here, so this is the only change needed.
-  return MOCK_SESSION;
+  // getSession() is the single source of truth — change it there, not here.
+  return getSession();
 }

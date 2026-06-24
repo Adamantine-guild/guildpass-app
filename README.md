@@ -53,6 +53,31 @@ pnpm install
 
 ---
 
+## Local Admin Access
+
+Management pages (`/passes`, `/guilds`, `/members`, `/activity`, `/settings`) are protected by `AdminGuard`. Unauthenticated visitors see an access-denied screen.
+
+To unlock these pages during local development, enable mock admin mode:
+
+1. Create or edit `apps/dashboard/.env.local`:
+
+```env
+NEXT_PUBLIC_MOCK_ADMIN=true
+```
+
+2. Restart the dev server (`pnpm dev`).
+
+The dashboard will use the mock session defined by `MOCK_ACTIVE_ROLE` in `apps/dashboard/lib/auth/session.ts`. Change that constant to simulate a different role (`owner`, `admin`, `moderator`, or `readonly`).
+
+| `NEXT_PUBLIC_MOCK_ADMIN` | Effect |
+|---|---|
+| `true` | Mock session active — management pages accessible |
+| unset / `false` | No session — management pages show access denied |
+
+> **Note:** `NEXT_PUBLIC_MOCK_ADMIN` is a development convenience only. When real authentication is wired up, replace `getSession()` in `apps/dashboard/lib/auth/session.ts` with your auth provider call. No page-level code needs to change.
+
+---
+
 ## Webhook Configuration
 
 To receive live activity updates in the dashboard, you must configure a webhook secret.

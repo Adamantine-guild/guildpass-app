@@ -23,7 +23,7 @@ const ROLE_BADGE: Record<
   readonly:  { label: "Read-only", className: "bg-slate-500 text-white" },
 };
 
-export default function Sidebar({ session }: { session?: Session }) {
+export default function Sidebar({ session }: { session?: Session | null }) {
   const pathname = usePathname();
   const badge = session ? ROLE_BADGE[session.role] : null;
 

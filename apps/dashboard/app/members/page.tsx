@@ -22,7 +22,7 @@ import { canManageMembers } from "@/lib/permissions";
 
 export default function MembersPage() {
   const session = useSession();
-  const canWrite = canManageMembers(session);
+  const canWrite = session ? canManageMembers(session) : false;
 
   return (
     <DashboardLayout title="Members" session={session}>

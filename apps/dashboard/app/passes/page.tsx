@@ -23,7 +23,7 @@ import { canManagePasses } from "@/lib/permissions";
 
 export default function PassesPage() {
   const session = useSession();
-  const canWrite = canManagePasses(session);
+  const canWrite = session ? canManagePasses(session) : false;
 
   return (
     <DashboardLayout title="Passes" session={session}>
