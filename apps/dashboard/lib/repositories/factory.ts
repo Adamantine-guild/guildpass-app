@@ -46,7 +46,7 @@ export function getRepositoryFactory(): IRepositoryFactory {
       },
       activityRepository() {
         if (!mockActivityRepo) mockActivityRepo = new MockActivityRepository();
-        return mockActivityRepo;
+        return mockActivityRepo as IActivityRepository;
       },
     };
   }

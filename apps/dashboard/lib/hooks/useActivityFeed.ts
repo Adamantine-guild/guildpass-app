@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ActivityEvent } from "@guildpass/integration-client";
-import { type Activity, fetchActivity, generateMockActivity } from "@/lib/mock-data";
 
 const REFRESH_MS =
   Number(process.env.NEXT_PUBLIC_ACTIVITY_REFRESH_MS) || 15_000;
@@ -18,35 +17,6 @@ interface UseActivityFeedResult {
   loading: boolean;
 }
 
-const TYPE_MAP: Record<Activity["type"], ActivityEvent["type"]> = {
-  member_joined: "member.joined",
-  pass_created: "pass.created",
-  pass_purchased: "pass.purchased",
-  role_changed: "member.roles_changed",
-  access_granted: "access.granted",
-};
-
-function isActivityEvent(activity: Activity | ActivityEvent): activity is ActivityEvent {
-  return "source" in activity && "severity" in activity;
-}
-
-function toActivityEvent(activity: Activity | ActivityEvent): ActivityEvent {
-  if (isActivityEvent(activity)) return activity;
-
-function toActivityEvent(activity: Activity): ActivityEvent {
-  return {
-    id: activity.id,
-    type: TYPE_MAP[activity.type],
-    source: "dashboard",
-    severity: "info",
-    actor: {
-      name: activity.actor,
-    },
-    timestamp: activity.timestamp,
-    description: activity.description,
-  };
-}
-
 export function useActivityFeed({ limit }: UseActivityFeedOptions = {}): UseActivityFeedResult {
   const [events, setEvents]           = useState<ActivityEvent[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -55,31 +25,35 @@ export function useActivityFeed({ limit }: UseActivityFeedOptions = {}): UseActi
 
   const mergeEvents = useCallback((incoming: ActivityEvent[]) => {
     const fresh = incoming.filter((e) => !seenIds.current.has(e.id));
-    if (fresh.length === 0) return;
+    if (fresh.length === 0 && events.length > 0) return;
+
     fresh.forEach((e) => seenIds.current.add(e.id));
     setEvents((prev) => {
       const merged = [...fresh, ...prev].sort(
         (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       );
-      return limit ? merged.slice(0, limit) : merged;
+      const unique = Array.from(new Map(merged.map(item => [item.id, item])).values());
+      return limit ? unique.slice(0, limit) : unique;
     });
     setLastUpdated(new Date());
-  }, [limit]);
+  }, [limit, events.length]);
 
-  /** Single poll tick: fetch real/mock data + inject one simulated event in mock mode. */
+  /** Single poll tick: fetch real data. */
   const poll = useCallback(async () => {
     try {
-      const data = await fetchActivity();
-      mergeEvents(data.map(toActivityEvent));
-      // Simulate a new arriving event every tick in mock/dev mode
-      const mock = generateMockActivity();
-      mergeEvents([toActivityEvent(mock)]);
-    } catch {
-      // Silently swallow fetch errors; the feed keeps its last known state
+      const url = new URL("/api/activity", window.location.origin);
+      if (limit) url.searchParams.set("limit", limit.toString());
+
+      const response = await fetch(url.toString());
+      if (!response.ok) throw new Error("Failed to fetch activity");
+      const data = await response.json();
+      mergeEvents(data);
+    } catch (error) {
+      console.warn("Error polling activity:", error);
     } finally {
       setLoading(false);
     }
-  }, [mergeEvents]);
+  }, [mergeEvents, limit]);
 
   useEffect(() => {
     // Initial load

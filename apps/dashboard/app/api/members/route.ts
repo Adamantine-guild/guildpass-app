@@ -1,30 +1,25 @@
 import { NextResponse } from "next/server";
 import { handleApiError, apiError } from "@/lib/api-helpers";
-import { mockMembers, type Member } from "@/lib/mock-data";
+import { type Member } from "@/lib/mock-data";
 import { MOCK_API_SESSION } from "@/lib/auth/session";
 import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
 import { IntegrationClient } from "@guildpass/integration-client";
 import { getEnv, getApiMode } from "@/lib/env";
-import { getMemberRepository } from "@/lib/repositories/factory";
+import { memberService } from "@/lib/data/member-service";
 
 /**
  * GET /api/members
  * Accessible to all authenticated roles (members:read).
- * In live mode: supports wallet and discordUserId lookups.
- * In mock mode: returns all members from configured repository.
  */
 export async function GET(request: Request): Promise<NextResponse> {
   return handleApiError(async () => {
     const apiMode = getApiMode();
-
-    // Allow live lookups by query: ?wallet=0x.. or ?discordUserId=123
     const url = new URL(request.url);
     const wallet = url.searchParams.get("wallet");
     const discordUserId = url.searchParams.get("discordUserId");
 
     if (apiMode === "live") {
       const env = getEnv();
-      // Allow injecting a test client via globalThis to avoid making real HTTP calls in tests
       const testClient = (globalThis as any).__TEST_INTEGRATION_CLIENT;
       const client =
         testClient ??
@@ -36,7 +31,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       try {
         if (wallet) {
           const m = await client.getMembershipByWallet(wallet);
-          if (!m) return NextResponse.json([], { status: 200 });
+          if (!m) return [];
           const mapped: Member = {
             id: m.userId,
             wallet: m.wallet ?? "",
@@ -46,12 +41,12 @@ export async function GET(request: Request): Promise<NextResponse> {
             joinedAt: m.updatedAt,
             lastActive: m.updatedAt,
           };
-          return NextResponse.json([mapped]);
+          return [mapped];
         }
 
         if (discordUserId) {
           const m = await client.getMembershipByDiscordUser(discordUserId);
-          if (!m) return NextResponse.json([], { status: 200 });
+          if (!m) return [];
           const mapped: Member = {
             id: m.userId,
             wallet: m.wallet ?? "",
@@ -61,10 +56,9 @@ export async function GET(request: Request): Promise<NextResponse> {
             joinedAt: m.updatedAt,
             lastActive: m.updatedAt,
           };
-          return NextResponse.json([mapped]);
+          return [mapped];
         }
 
-        // We don't support listing all members via the core API here.
         return apiError("Live mode requires a lookup (wallet or discordUserId)", 501);
       } catch (err) {
         console.error("Error fetching membership in live mode:", err);
@@ -72,26 +66,21 @@ export async function GET(request: Request): Promise<NextResponse> {
       }
     }
 
-    // Mock mode — return all members from configured repository
-    try {
-      const memberRepository = getMemberRepository();
-      return NextResponse.json(await memberRepository.getAll());
-    } catch (error) {
-      console.error("Error fetching members:", error);
-      // Fallback to mock data on error
-      return NextResponse.json(mockMembers as Member[]);
+    // Mock mode
+    if (wallet) {
+      const member = await memberService.getMemberByWallet(wallet);
+      return member ? [member] : [];
     }
+
+    return await memberService.getAllMembers();
   });
 }
 
 /**
  * POST /api/members
- * Requires members:write permission (invite / create a member).
- *
- * ⚠️  In production, resolve the session from the request (JWT / cookie)
- *     instead of using MOCK_SESSION, then assertPermission against it.
+ * Requires members:write permission.
  */
-export async function POST(): Promise<NextResponse> {
+export async function POST(request: Request): Promise<NextResponse> {
   try {
     assertPermission(MOCK_API_SESSION, "members:write");
   } catch (err) {
@@ -102,16 +91,21 @@ export async function POST(): Promise<NextResponse> {
   }
 
   return handleApiError(async () => {
-    // TODO: implement member invitation / creation logic
-    return { message: "Member invited (stub)" };
+    const body = await request.json();
+
+    if (!body.wallet) {
+      return apiError("Wallet address is required", 400);
+    }
+
+    return await memberService.createMember(body);
   });
 }
 
 /**
  * DELETE /api/members
- * Requires members:write permission (remove a member).
+ * Requires members:write permission.
  */
-export async function DELETE(): Promise<NextResponse> {
+export async function DELETE(request: Request): Promise<NextResponse> {
   try {
     assertPermission(MOCK_API_SESSION, "members:write");
   } catch (err) {
@@ -122,7 +116,18 @@ export async function DELETE(): Promise<NextResponse> {
   }
 
   return handleApiError(async () => {
-    // TODO: implement member removal logic
-    return { message: "Member removed (stub)" };
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return apiError("Member ID is required", 400);
+    }
+
+    const deleted = await memberService.deleteMember(id);
+    if (!deleted) {
+      return apiError("Member not found", 404);
+    }
+
+    return { message: "Member removed" };
   });
 }

@@ -142,7 +142,7 @@ export const MOCK_SESSIONS: Record<Role, Session> = {
  * @example
  *   export const MOCK_ACTIVE_ROLE: Role = "readonly";
  */
-export const MOCK_ACTIVE_ROLE: Role = "readonly";
+export const MOCK_ACTIVE_ROLE: Role = (process.env.MOCK_ACTIVE_ROLE as Role) || "owner";
 
 /**
  * The session object consumed by useSession() and all permission helpers.
@@ -163,5 +163,5 @@ export const MOCK_SESSION: Session = MOCK_SESSIONS[MOCK_ACTIVE_ROLE];
  * In production this entire export is deleted — real session resolution
  * happens per-request from the incoming JWT/cookie, not from a shared constant.
  */
-export const MOCK_API_ROLE: Role = MOCK_ACTIVE_ROLE;
+export const MOCK_API_ROLE: Role = (process.env.MOCK_API_ROLE as Role) || MOCK_ACTIVE_ROLE;
 export const MOCK_API_SESSION: Session = MOCK_SESSIONS[MOCK_API_ROLE];

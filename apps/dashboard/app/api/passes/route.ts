@@ -1,44 +1,31 @@
 import { NextResponse } from "next/server";
 import { handleApiError, apiError } from "@/lib/api-helpers";
-import { mockPasses, type Pass } from "@/lib/mock-data";
 import { MOCK_API_SESSION } from "@/lib/auth/session";
 import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
 import { getApiMode } from "@/lib/env";
-import { getPassRepository } from "@/lib/repositories/factory";
+import { passService } from "@/lib/data/pass-service";
 
 /**
  * GET /api/passes
  * Accessible to all authenticated roles (passes:read).
- * Fetches from the configured repository (mock or durable).
  */
 export async function GET(): Promise<NextResponse> {
   return handleApiError(async () => {
     const apiMode = getApiMode();
 
     if (apiMode === "live") {
-      // IntegrationClient currently does not expose pass listing.
       return apiError("Pass listing in live mode is not implemented", 501);
     }
 
-    try {
-      const passRepository = getPassRepository();
-      return await passRepository.getAll();
-    } catch (error) {
-      console.error("Error fetching passes:", error);
-      // Fallback to mock data on error
-      return mockPasses as Pass[];
-    }
+    return await passService.getAllPasses();
   });
 }
 
 /**
  * POST /api/passes
  * Requires passes:write permission.
- *
- * ⚠️  In production, resolve the session from the request (JWT / cookie)
- *     instead of using MOCK_SESSION, then assertPermission against it.
  */
-export async function POST(): Promise<NextResponse> {
+export async function POST(request: Request): Promise<NextResponse> {
   try {
     assertPermission(MOCK_API_SESSION, "passes:write");
   } catch (err) {
@@ -49,8 +36,14 @@ export async function POST(): Promise<NextResponse> {
   }
 
   return handleApiError(async () => {
-    // TODO: implement pass creation logic
-    return { message: "Pass created (stub)" };
+    const body = await request.json();
+
+    // Simple validation
+    if (!body.name) {
+      return apiError("Pass name is required", 400);
+    }
+
+    return await passService.createPass(body);
   });
 }
 
@@ -58,7 +51,7 @@ export async function POST(): Promise<NextResponse> {
  * DELETE /api/passes
  * Requires passes:write permission.
  */
-export async function DELETE(): Promise<NextResponse> {
+export async function DELETE(request: Request): Promise<NextResponse> {
   try {
     assertPermission(MOCK_API_SESSION, "passes:write");
   } catch (err) {
@@ -69,50 +62,18 @@ export async function DELETE(): Promise<NextResponse> {
   }
 
   return handleApiError(async () => {
-    // TODO: implement pass deletion logic
-    return { message: "Pass deleted (stub)" };
-  });
-}
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
 
-/**
- * POST /api/passes
- * Requires passes:write permission.
- *
- * ⚠️  In production, resolve the session from the request (JWT / cookie)
- *     instead of using MOCK_SESSION, then assertPermission against it.
- */
-export async function POST(): Promise<NextResponse> {
-  try {
-    assertPermission(MOCK_API_SESSION, "passes:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
+    if (!id) {
+      return apiError("Pass ID is required", 400);
     }
-    throw err;
-  }
 
-  return handleApiError(async () => {
-    // TODO: implement pass creation logic
-    return { message: "Pass created (stub)" };
-  });
-}
-
-/**
- * DELETE /api/passes
- * Requires passes:write permission.
- */
-export async function DELETE(): Promise<NextResponse> {
-  try {
-    assertPermission(MOCK_API_SESSION, "passes:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
+    const deleted = await passService.deletePass(id);
+    if (!deleted) {
+      return apiError("Pass not found", 404);
     }
-    throw err;
-  }
 
-  return handleApiError(async () => {
-    // TODO: implement pass deletion logic
-    return { message: "Pass deleted (stub)" };
+    return { message: "Pass deleted" };
   });
 }
