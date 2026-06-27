@@ -1,44 +1,32 @@
 import { NextResponse } from "next/server";
 import { handleApiError, apiError } from "@/lib/api-helpers";
-import { mockGuilds, type Guild } from "@/lib/mock-data";
+import { type Guild } from "@/lib/mock-data";
 import { MOCK_API_SESSION } from "@/lib/auth/session";
 import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
 import { getApiMode } from "@/lib/env";
-import { getGuildRepository } from "@/lib/repositories/factory";
+import { guildService } from "@/lib/data/guild-service";
 
 /**
  * GET /api/guilds
  * Accessible to all authenticated roles (guilds:read).
- * Fetches from the configured repository (mock or durable).
  */
 export async function GET(): Promise<NextResponse> {
   return handleApiError(async () => {
     const apiMode = getApiMode();
 
     if (apiMode === "live") {
-      // IntegrationClient doesn't provide guild listing; require implementation in future
       return apiError("Guild listing in live mode is not implemented", 501);
     }
 
-    try {
-      const guildRepository = getGuildRepository();
-      return await guildRepository.getAll();
-    } catch (error) {
-      console.error("Error fetching guilds:", error);
-      // Fallback to mock data on error
-      return mockGuilds as Guild[];
-    }
+    return await guildService.getAllGuilds();
   });
 }
 
 /**
  * POST /api/guilds
- * Requires guilds:write permission (create a guild).
- *
- * ⚠️  In production, resolve the session from the request (JWT / cookie)
- *     instead of using MOCK_SESSION, then assertPermission against it.
+ * Requires guilds:write permission.
  */
-export async function POST(): Promise<NextResponse> {
+export async function POST(request: Request): Promise<NextResponse> {
   try {
     assertPermission(MOCK_API_SESSION, "guilds:write");
   } catch (err) {
@@ -49,16 +37,21 @@ export async function POST(): Promise<NextResponse> {
   }
 
   return handleApiError(async () => {
-    // TODO: implement guild creation logic
-    return { message: "Guild created (stub)" };
+    const body = await request.json();
+
+    if (!body.name) {
+      return apiError("Guild name is required", 400);
+    }
+
+    return await guildService.createGuild(body);
   });
 }
 
 /**
  * DELETE /api/guilds
- * Requires guilds:write permission (remove a guild).
+ * Requires guilds:write permission.
  */
-export async function DELETE(): Promise<NextResponse> {
+export async function DELETE(request: Request): Promise<NextResponse> {
   try {
     assertPermission(MOCK_API_SESSION, "guilds:write");
   } catch (err) {
@@ -69,50 +62,18 @@ export async function DELETE(): Promise<NextResponse> {
   }
 
   return handleApiError(async () => {
-    // TODO: implement guild deletion logic
-    return { message: "Guild deleted (stub)" };
-  });
-}
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
 
-/**
- * POST /api/guilds
- * Requires guilds:write permission (create a guild).
- *
- * ⚠️  In production, resolve the session from the request (JWT / cookie)
- *     instead of using MOCK_SESSION, then assertPermission against it.
- */
-export async function POST(): Promise<NextResponse> {
-  try {
-    assertPermission(MOCK_API_SESSION, "guilds:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
+    if (!id) {
+      return apiError("Guild ID is required", 400);
     }
-    throw err;
-  }
 
-  return handleApiError(async () => {
-    // TODO: implement guild creation logic
-    return { message: "Guild created (stub)" };
-  });
-}
-
-/**
- * DELETE /api/guilds
- * Requires guilds:write permission (remove a guild).
- */
-export async function DELETE(): Promise<NextResponse> {
-  try {
-    assertPermission(MOCK_API_SESSION, "guilds:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
+    const deleted = await guildService.deleteGuild(id);
+    if (!deleted) {
+      return apiError("Guild not found", 404);
     }
-    throw err;
-  }
 
-  return handleApiError(async () => {
-    // TODO: implement guild deletion logic
-    return { message: "Guild deleted (stub)" };
+    return { message: "Guild deleted" };
   });
 }

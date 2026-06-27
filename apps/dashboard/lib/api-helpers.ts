@@ -12,10 +12,13 @@ export function apiError(
 }
 
 export async function handleApiError<T>(
-  fn: () => Promise<T>
+  fn: () => Promise<T | NextResponse<T | { error: string }>>
 ): Promise<NextResponse<T | { error: string }>> {
   try {
     const data = await fn();
+    if (data instanceof NextResponse) {
+      return data;
+    }
     return apiResponse(data);
   } catch (err) {
     console.error("API Error:", err);

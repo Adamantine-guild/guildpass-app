@@ -130,12 +130,12 @@ test("Repository Factory: MockActivityRepository", async () => {
     description: "Member joined",
   };
 
-  const result1 = await repo.append(event1);
-  assert.strictEqual(result1, "recorded", "First event should be recorded");
+  const result1 = await repo.append(event1 as any);
+  assert.strictEqual(result1.id, event1.id, "First event should be recorded");
 
   // Test duplicate detection
-  const result2 = await repo.append(event1);
-  assert.strictEqual(result2, "duplicate", "Same event should be detected as duplicate");
+  const result2 = await repo.append(event1 as any);
+  assert.strictEqual(result2.id, event1.id, "Same event should be returned");
 
   // Test query
   const events = await repo.query({});

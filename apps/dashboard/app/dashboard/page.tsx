@@ -5,15 +5,15 @@ import StatCard from "@/components/StatCard";
 import StatusBadge from "@/components/StatusBadge";
 import LastUpdated from "@/components/LastUpdated";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
-import { mockPasses, mockGuilds, mockMembers, type Member as MockMember, type Pass as MockPass, type Guild as MockGuild } from "@/lib/mock-data";
+import { type Member as MockMember, type Pass as MockPass } from "@/lib/mock-data";
 import { useEffect, useState } from "react";
 
 export default function DashboardPage() {
   const { events, lastUpdated } = useActivityFeed({ limit: 5 });
 
-  const [passesCount, setPassesCount] = useState<number>(mockPasses.length);
-  const [guildsCount, setGuildsCount] = useState<number>(mockGuilds.length);
-  const [activeMembersCount, setActiveMembersCount] = useState<number>(mockMembers.filter((m) => m.status === "active").length);
+  const [passes, setPasses] = useState<MockPass[]>([]);
+  const [guildsCount, setGuildsCount] = useState<number>(0);
+  const [activeMembersCount, setActiveMembersCount] = useState<number>(0);
 
   useEffect(() => {
     let mounted = true;
@@ -28,7 +28,7 @@ export default function DashboardPage() {
         if (mounted) {
           if (passesRes.ok) {
             const p = await passesRes.json();
-            if (Array.isArray(p)) setPassesCount(p.length);
+            if (Array.isArray(p)) setPasses(p);
           }
           if (guildsRes.ok) {
             const g = await guildsRes.json();
@@ -40,7 +40,7 @@ export default function DashboardPage() {
           }
         }
       } catch (err) {
-        console.warn('Dashboard stats fetch failed, using mock counts', err);
+        console.warn('Dashboard stats fetch failed', err);
       }
     }
     load();
@@ -50,7 +50,7 @@ export default function DashboardPage() {
   return (
     <DashboardLayout title="Dashboard">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Total Passes"    value={passesCount}   icon="🎫" trend="+2 this week" />
+        <StatCard title="Total Passes"    value={passes.length}   icon="🎫" trend="+2 this week" />
         <StatCard title="Active Guilds"   value={guildsCount}  icon="🏰" trend="+1 this week" />
         <StatCard title="Active Members"  value={activeMembersCount} icon="👥" trend="+12 this week" />
         <StatCard title="Total Activity"  value={events.length} icon="📋" trend="live" />
@@ -81,11 +81,11 @@ export default function DashboardPage() {
           </ul>
         </div>
 
-        {/* ── Recent passes (static) ──────────────────────────────── */}
+        {/* ── Recent passes ──────────────────────────────── */}
         <div className="bg-white border border-slate-200 rounded-xl p-6">
           <h2 className="text-xl font-semibold text-slate-800 mb-4">Recent Passes</h2>
           <ul className="space-y-3">
-            {mockPasses.slice(0, 4).map((pass) => (
+            {passes.slice(0, 4).map((pass) => (
               <li key={pass.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                 <div>
                   <p className="font-medium text-slate-800">{pass.name}</p>
@@ -94,6 +94,9 @@ export default function DashboardPage() {
                 <StatusBadge status={pass.status} />
               </li>
             ))}
+            {passes.length === 0 && (
+               <li className="text-center py-4 text-slate-400 text-sm">No passes found</li>
+            )}
           </ul>
         </div>
       </div>

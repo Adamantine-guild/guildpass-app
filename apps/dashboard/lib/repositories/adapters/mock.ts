@@ -10,9 +10,31 @@ import type {
   IMemberRepository,
   IActivityRepository,
 } from "../types";
-import type { Pass, Guild, Member } from "../../mock-data";
-import type { ActivityEvent } from "@/lib/activity/types";
-import { mockPasses, mockGuilds, mockMembers } from "../../mock-data";
+import type { Pass, Guild, Member, Activity } from "../../mock-data";
+import type { ActivityEvent, ActivityEventType } from "@/lib/activity/types";
+import { mockPasses, mockGuilds, mockMembers, mockActivity } from "../../mock-data";
+
+const ACTIVITY_TYPE_MAP: Record<Activity["type"], ActivityEventType> = {
+  member_joined: "member.joined",
+  pass_created: "pass.created",
+  pass_purchased: "pass.purchased",
+  role_changed: "member.roles_changed",
+  access_granted: "access.granted",
+};
+
+function toActivityEvent(activity: Activity): ActivityEvent {
+  return {
+    id: activity.id,
+    type: ACTIVITY_TYPE_MAP[activity.type] || "system.info",
+    source: "dashboard",
+    severity: "info",
+    actor: {
+      name: activity.actor,
+    },
+    timestamp: activity.timestamp,
+    description: activity.description,
+  };
+}
 
 /**
  * Mock pass repository: in-memory storage.
@@ -164,14 +186,29 @@ export class MockActivityRepository implements IActivityRepository {
   private events: ActivityEvent[] = [];
   private processedIds: Set<string> = new Set();
 
-  async append(event: Omit<ActivityEvent, "id" | "timestamp">): Promise<ActivityEvent> {
+  constructor() {
+    mockActivity.forEach((a) => {
+      const event = toActivityEvent(a);
+      this.events.push(event);
+      this.processedIds.add(event.id);
+    });
+  }
+
+  async append(event: Omit<ActivityEvent, "id" | "timestamp"> & { id?: string; timestamp?: string }): Promise<ActivityEvent> {
+    if (event.id && this.processedIds.has(event.id)) {
+      // In a real scenario we might throw or return existing, but IActivityRepository.append expects Promise<ActivityEvent>
+      return this.events.find(e => e.id === event.id)!;
+    }
+
     const fullEvent: ActivityEvent = {
       ...event,
-      id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: new Date().toISOString(),
+      id: event.id || `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: event.timestamp || new Date().toISOString(),
     };
+
     this.events.unshift(fullEvent);
     this.processedIds.add(fullEvent.id);
+
     return fullEvent;
   }
 

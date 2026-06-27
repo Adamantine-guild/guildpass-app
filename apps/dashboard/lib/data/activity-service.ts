@@ -1,5 +1,5 @@
 import { ActivityEvent, ActivityEventType } from "@guildpass/integration-client";
-import { activityStorage } from "../activity/storage";
+import { getActivityRepository } from "../repositories/factory";
 
 /**
  * Activity service for managing audit events
@@ -9,31 +9,16 @@ class ActivityService {
    * Create a new activity event and store it
    */
   async createEvent(event: Omit<ActivityEvent, "id" | "timestamp">): Promise<ActivityEvent> {
-    const fullEvent: ActivityEvent = {
-      ...event,
-      id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: new Date().toISOString(),
-    };
-
-    await activityStorage.addEvent(fullEvent);
-    return fullEvent;
+    const repo = getActivityRepository();
+    return repo.append(event);
   }
 
   /**
    * Get all activity events
    */
   async getEvents(options?: { limit?: number; type?: ActivityEventType }): Promise<ActivityEvent[]> {
-    let events = await activityStorage.getEvents() as ActivityEvent[];
-    
-    if (options?.type) {
-      events = events.filter(e => e.type === options.type);
-    }
-    
-    if (options?.limit) {
-      events = events.slice(0, options.limit);
-    }
-    
-    return events;
+    const repo = getActivityRepository();
+    return repo.query(options);
   }
 
   /**

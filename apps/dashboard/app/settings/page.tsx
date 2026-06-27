@@ -21,15 +21,43 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { useSession } from "@/lib/hooks/useSession";
 import { canEditSettings } from "@/lib/permissions";
+import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
   const session = useSession();
   const canEdit = canEditSettings(session);
+  const [settings, setSettings] = useState<any>({
+    workspaceName: "GuildPass DAO",
+    timezone: "UTC",
+    email: "admin@guildpass.xyz"
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          setSettings(data);
+        }
+      } catch (err) {
+        console.warn("Error fetching settings:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
 
-    const res = await fetch("/api/settings", { method: "PATCH" });
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceName: settings.workspaceName })
+    });
 
     if (res.status === 403) {
       const body = await res.json().catch(() => ({}));
@@ -44,6 +72,20 @@ export default function SettingsPage() {
 
     alert("An unexpected error occurred. Please try again.");
   }
+
+  if (loading) {
+    return (
+      <DashboardLayout title="Settings" session={session}>
+        <div className="text-center py-12 text-slate-500">Loading settings...</div>
+      </DashboardLayout>
+    );
+  }
+
+  const displaySettings = settings || {
+    workspaceName: "GuildPass DAO",
+    timezone: "UTC",
+    email: "admin@guildpass.xyz"
+  };
 
   return (
     <DashboardLayout title="Settings" session={session}>
@@ -83,7 +125,8 @@ export default function SettingsPage() {
                 <input
                   id="workspace-name"
                   type="text"
-                  defaultValue="GuildPass DAO"
+                  value={settings.workspaceName}
+                  onChange={(e) => setSettings({ ...settings, workspaceName: e.target.value })}
                   disabled={!canEdit}
                   className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
                       ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
@@ -100,6 +143,7 @@ export default function SettingsPage() {
                 </label>
                 <select
                   id="timezone"
+                  defaultValue={displaySettings.timezone}
                   disabled={!canEdit}
                   className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
                       ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
@@ -146,7 +190,7 @@ export default function SettingsPage() {
                 <input
                   id="email"
                   type="email"
-                  defaultValue="admin@guildpass.xyz"
+                  defaultValue={displaySettings.email}
                   disabled={!canEdit}
                   className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
                       ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
