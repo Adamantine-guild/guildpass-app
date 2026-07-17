@@ -95,9 +95,17 @@ export function getEnv() {
   const apiMode = getApiMode();
   const storageMode = getStorageMode();
 
-  // Only require core URL when running in live mode
-  if (apiMode === "live" && !GUILD_PASS_CORE_URL) {
-    throw new Error("GUILD_PASS_CORE_URL is not set (required for live mode)");
+  // Require core vars when running in live mode
+  if (apiMode === "live") {
+    const missing: string[] = [];
+    if (!GUILD_PASS_CORE_URL) missing.push("GUILD_PASS_CORE_URL");
+    if (!GUILD_PASS_CORE_API_KEY) missing.push("GUILD_PASS_CORE_API_KEY");
+    if (!WEBHOOK_SECRET) missing.push("WEBHOOK_SECRET");
+    if (missing.length > 0) {
+      throw new Error(
+        `Missing required env vars in live mode: ${missing.join(", ")}`
+      );
+    }
   }
 
   return {
