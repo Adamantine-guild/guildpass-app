@@ -20,6 +20,7 @@ import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-cl
 import type { DashboardSettings } from "../../settings";
 import { mockPasses, mockGuilds, mockMembers } from "../../mock-data";
 import { DEFAULT_SETTINGS } from "../../settings";
+import { computeDiff } from "@/lib/activity/diff";
 import { filterMembers, filterPasses, paginateItems } from "@/lib/pagination";
 
 /**
