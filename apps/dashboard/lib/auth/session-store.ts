@@ -29,8 +29,8 @@
  *    intervention required.
  */
 
-import type { Session, Role, Permission } from "./session";
-import { ROLE_PERMISSIONS } from "./session";
+import type { Session, Role } from "./session";
+import { DEFAULT_GUILD_ID } from "../mock-data";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -52,10 +52,8 @@ export interface AccessTokenPayload {
   sid: string;
   /** The user's display name. */
   name: string;
-  /** The user's role at token-issue time. */
-  role: Role;
-  /** Flat permission list derived from the role. */
-  permissions: Permission[];
+  /** Scoped roles mapping: guildId -> Role */
+  roles: Record<string, Role>;
   /** Issued-at timestamp (Unix seconds). */
   iat: number;
   /** Expiration timestamp (Unix seconds). */
@@ -89,7 +87,7 @@ export interface SessionStore {
   createSession(params: {
     userId: string;
     name: string;
-    role: Role;
+    roles: Record<string, Role>;
   }): Promise<TokenPair>;
 
   /** Validate an access token and return the session it encodes. */
@@ -266,7 +264,7 @@ export function createSessionStore(): SessionStore {
   const store = _store;
 
   return {
-    async createSession({ userId, name, role }) {
+    async createSession({ userId, name, roles }: { userId: string; name: string; roles: Record<string, Role>; }) {
       const now = Date.now();
       const sessionId = crypto.randomUUID();
       const refreshToken = generateRefreshToken();
@@ -295,8 +293,7 @@ export function createSessionStore(): SessionStore {
         sub: userId,
         sid: sessionId,
         name,
-        role,
-        permissions: ROLE_PERMISSIONS[role],
+        roles,
         iat: nowSec,
         exp: nowSec + ACCESS_TOKEN_TTL,
       };
@@ -306,19 +303,18 @@ export function createSessionStore(): SessionStore {
       return { accessToken, refreshToken };
     },
 
-    async validateAccessToken(token) {
+    async validateAccessToken(token: string) {
       const payload = await verifyAccessToken(token);
       if (!payload) return null;
 
       return {
         userId: payload.sub,
         name: payload.name,
-        role: payload.role,
-        permissions: payload.permissions,
+        roles: payload.roles,
       };
     },
 
-    async refreshSession(refreshToken) {
+    async refreshSession(refreshToken: string) {
       const refreshHash = await hashToken(refreshToken);
 
       // Find the session with this refresh token hash.
@@ -348,46 +344,33 @@ export function createSessionStore(): SessionStore {
       // Delete the old session record (one-time use refresh token).
       store.sessions.delete(found.sessionId);
 
-      // Create a new session (new refresh token, new generation snapshot).
-      // We need the user's current name and role — in a production system
-      // this would be fetched from the user store. For now, we preserve
-      // the existing role from the access token payload. In practice,
-      // the refresh endpoint receives the old access token too, so we
-      // can extract the name/role from it or look up the user.
-      //
-      // For a proper implementation, the refresh endpoint should also
-      // receive the access token to extract user metadata. Here we
-      // construct a new session with the current generation.
+      // Create a new session with placeholder roles.
       return this.createSession({
         userId: found.userId,
         name: found.userId, // placeholder — real impl fetches from user store
-        role: "readonly", // placeholder — real impl needs current role
-        // NOTE: The above placeholders are intentional. In a fully wired
-        // production system, refreshSession also receives the old accessToken
-        // (or looks up the user) to get the current name and role.
-        // See the refresh endpoint for the complete implementation.
+        roles: { [DEFAULT_GUILD_ID]: "readonly" }, // placeholder — real impl needs current roles
       });
     },
 
-    async revokeSession(sessionId) {
+    async revokeSession(sessionId: string) {
       const record = store.sessions.get(sessionId);
       if (record) {
         record.revoked = true;
       }
     },
 
-    async invalidateUserSessions(userId) {
+    async invalidateUserSessions(userId: string) {
       // Bump the generation counter. All existing sessions with a lower
       // generation will be denied on refresh.
       const currentGen = store.generations.get(userId) ?? 0;
       store.generations.set(userId, currentGen + 1);
     },
 
-    async getUserGeneration(userId) {
+    async getUserGeneration(userId: string) {
       return store.generations.get(userId) ?? 0;
     },
 
-    async getUserSessions(userId) {
+    async getUserSessions(userId: string) {
       const now = Date.now();
       const sessions: SessionRecord[] = [];
       for (const [, record] of store.sessions) {
@@ -406,17 +389,15 @@ export function createSessionStore(): SessionStore {
  * Refresh a session with explicit user metadata.
  *
  * Unlike `SessionStore.refreshSession()`, this variant receives the current
- * user name and role rather than placeholders. This is the function the
+ * user name and scoped roles rather than placeholders. This is the function the
  * refresh API endpoint should call.
  */
 export async function refreshSessionWithMetadata(
   store: SessionStore,
   refreshToken: string,
   currentName: string,
-  currentRole: Role,
+  currentRoles: Record<string, Role>,
 ): Promise<TokenPair | null> {
-  // We need access to the internal store to validate the refresh token
-  // and get the userId. For the in-memory store, we do a direct lookup.
   const refreshHash = await hashToken(refreshToken);
 
   let found: SessionRecord | null = null;
@@ -443,7 +424,7 @@ export async function refreshSessionWithMetadata(
   return store.createSession({
     userId: found.userId,
     name: currentName,
-    role: currentRole,
+    roles: currentRoles,
   });
 }
 

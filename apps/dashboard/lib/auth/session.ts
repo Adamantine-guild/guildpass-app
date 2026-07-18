@@ -5,7 +5,7 @@
  *
  * Contains:
  *  - Role and Permission type unions
- *  - Session interface
+ *  - Session interface (redesigned for per-guild roles)
  *  - ROLE_PERMISSIONS matrix — what each role is allowed to do
  *  - Mock sessions for all four roles (dev/test use)
  *  - MOCK_SESSION — the active mock session (change MOCK_ACTIVE_ROLE to switch)
@@ -14,6 +14,8 @@
  *     (e.g. `getServerSession()` from next-auth, or a JWT decode) when
  *     backend authentication is wired up.
  */
+
+import { DEFAULT_GUILD_ID } from "../mock-data";
 
 // ── Roles ─────────────────────────────────────────────────────────────────────
 
@@ -53,14 +55,8 @@ export interface Session {
   userId: string;
   /** Display name shown in the sidebar role badge */
   name: string;
-  /** The user's single assigned role */
-  role: Role;
-  /**
-   * Flat list of permissions granted to this session.
-   * Derived from ROLE_PERMISSIONS[role] at session-creation time so that
-   * individual permission checks are O(1) array includes.
-   */
-  permissions: Permission[];
+  /** Scoped roles mapping: guildId -> Role */
+  roles: Record<string, Role>;
 }
 
 // ── Permission matrix ─────────────────────────────────────────────────────────
@@ -115,26 +111,30 @@ export const MOCK_SESSIONS: Record<Role, Session> = {
   owner: {
     userId: "mock-owner-001",
     name: "Owner Alice",
-    role: "owner",
-    permissions: ROLE_PERMISSIONS.owner,
+    roles: {
+      [DEFAULT_GUILD_ID]: "owner",
+    },
   },
   admin: {
     userId: "mock-admin-001",
     name: "Admin Bob",
-    role: "admin",
-    permissions: ROLE_PERMISSIONS.admin,
+    roles: {
+      [DEFAULT_GUILD_ID]: "admin",
+    },
   },
   moderator: {
     userId: "mock-moderator-001",
     name: "Moderator Charlie",
-    role: "moderator",
-    permissions: ROLE_PERMISSIONS.moderator,
+    roles: {
+      [DEFAULT_GUILD_ID]: "moderator",
+    },
   },
   readonly: {
     userId: "mock-readonly-001",
     name: "Viewer Diana",
-    role: "readonly",
-    permissions: ROLE_PERMISSIONS.readonly,
+    roles: {
+      [DEFAULT_GUILD_ID]: "readonly",
+    },
   },
 };
 
