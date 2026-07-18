@@ -12,6 +12,7 @@ import {
 } from "@guildpass/integration-client";
 import type { ActivityChange } from "@guildpass/integration-client";
 import { useMemo, useState } from "react";
+import VirtualList from "@/components/VirtualList";
 
 const TYPE_ICON: Record<ActivityEventType, string> = {
   "member.joined": "👤",
@@ -247,9 +248,13 @@ export default function ActivityPage() {
           </div>
         ) : (
           <>
-            <ul className="divide-y divide-slate-100">
-              {events.map((activity) => (
-                <li key={activity.id} className="flex items-start gap-4 px-6 py-4 animate-[fadeIn_0.3s_ease-in]">
+            <VirtualList
+              items={events}
+              className="divide-y divide-slate-100"
+              estimatedItemHeight={88}
+              overscan={3}
+              renderItem={(activity) => (
+                <li className="flex items-start gap-4 px-6 py-4 animate-[fadeIn_0.3s_ease-in]">
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg ${TYPE_COLOR[activity.type]}`}>
                     {TYPE_ICON[activity.type]}
                   </div>
@@ -293,8 +298,8 @@ export default function ActivityPage() {
                     )}
                   </div>
                 </li>
-              ))}
-            </ul>
+              )}
+            />
 
             {hasMore && (
               <div className="border-t border-slate-100 px-6 py-4 text-center">
