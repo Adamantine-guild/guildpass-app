@@ -21,7 +21,16 @@
 import type { Session } from "./session";
 import { MOCK_API_SESSION } from "./session";
 import { getApiMode } from "@/lib/env";
-import { cookies, headers } from "next/headers";
+import {
+  createSessionStore,
+  clearSessionStore,
+  type SessionStore,
+} from "./session-store";
+
+// NOTE: `cookies` and `headers` from "next/headers" are dynamically imported
+// inside `getServerComponentSession` to avoid breaking tests that run outside
+// the Next.js runtime. API routes use `getDashboardSession` which extracts
+// tokens from the Request object directly and doesn't need these imports.
 
 // ── Error types ──────────────────────────────────────────────────────────────
 
@@ -76,6 +85,38 @@ function extractAccessToken(request: Request): string | null {
   }
 
   return parts[1];
+}
+
+/**
+ * Extract Bearer token from an Authorization header string.
+ */
+function extractBearerToken(authHeader: string | null): string | null {
+  if (!authHeader) return null;
+
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
+    return null;
+  }
+
+  return parts[1];
+}
+
+/**
+ * Shared session verification function.
+ *
+ * Validates a session token (from cookie or Authorization header) against
+ * the session store and returns the corresponding Session object.
+ *
+ * This function is used by both:
+ *  - getDashboardSession (API routes) — extracts token from Request headers
+ *  - getServerComponentSession (Server Components) — extracts token from cookies/headers
+ *
+ * @param token - The access token to verify
+ * @returns The verified Session, or null if the token is invalid/expired
+ */
+export async function verifySessionToken(token: string): Promise<Session | null> {
+  const sessionStore = getSessionStore();
+  return sessionStore.validateAccessToken(token);
 }
 
 /**
@@ -154,27 +195,60 @@ export async function requireDashboardSession(request: Request): Promise<Session
 /**
  * Resolves the active session within Next.js Server Components or Layouts.
  *
- * Mock mode: Returns MOCK_SESSION (matching UI's MOCK_ACTIVE_ROLE).
- * Live mode: Parses incoming headers or cookies to validate real JWT/SIWE sessions.
+ * **Mock mode** (default, `DASHBOARD_API_MODE=mock`):
+ *   Returns `MOCK_SESSION` for predictable local role testing.
+ *   Change `MOCK_ACTIVE_ROLE` in `session.ts` to simulate different roles.
+ *
+ * **Live mode** (`DASHBOARD_API_MODE=live`):
+ *   Validates the access token from either:
+ *   1. The `guildpass_session` cookie (primary — set during sign-in)
+ *   2. The `Authorization: Bearer <token>` header (fallback)
+ *
+ *   Access tokens are short-lived (15 min) — this bounds the maximum window
+ *   of stale-permission access after a role change or revocation.
+ *   Throws `UnauthorizedError` if no token is present or validation fails.
+ *
+ * @throws {UnauthorizedError} When no valid session can be resolved.
  */
 export async function getServerComponentSession(): Promise<Session> {
   const mode = getApiMode();
 
   if (mode === "live") {
+    // Dynamically import Next.js headers utilities to avoid breaking tests
+    // that run outside the Next.js runtime. This is only needed for Server
+    // Components; API routes use getDashboardSession with Request objects.
+    const { cookies, headers } = await import("next/headers");
+
     const cookieStore = await cookies();
-    const token = cookieStore.get("guildpass_session")?.value;
+    const cookieToken = cookieStore.get("guildpass_session")?.value;
     const headerList = await headers();
     const authHeader = headerList.get("authorization");
+    const headerToken = extractBearerToken(authHeader);
 
-    if (!token && !authHeader) {
-      throw new UnauthorizedError("No session cookie or authorization header present.");
+    // Prefer cookie, fall back to Authorization header
+    const token = cookieToken || headerToken;
+
+    if (!token) {
+      throw new UnauthorizedError(
+        "No session cookie or authorization header present. " +
+          "Sign in to access this resource."
+      );
     }
 
-    // TODO: Wire up real validation logic here (JWT decode, next-auth session verification, etc.)
-    throw new UnauthorizedError("Live Server Component session resolution is not yet implemented.");
+    const session = await verifySessionToken(token);
+
+    if (!session) {
+      throw new UnauthorizedError(
+        "Session token is invalid or expired. " +
+          "Please sign in again to continue."
+      );
+    }
+
+    return session;
   }
 
-  // Fallback to the active UI mock role for clean local development workflows
+  // Mock mode — return the pre-configured UI mock session.
+  // This keeps local development and testing fully functional.
   const { MOCK_SESSION } = await import("./session");
   return MOCK_SESSION;
 }
