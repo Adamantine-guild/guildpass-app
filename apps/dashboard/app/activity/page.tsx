@@ -254,7 +254,7 @@ export default function ActivityPage() {
               estimatedItemHeight={88}
               overscan={3}
               renderItem={(activity) => (
-                <li className="flex items-start gap-4 px-6 py-4 animate-[fadeIn_0.3s_ease-in]">
+                <>
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg ${TYPE_COLOR[activity.type]}`}>
                     {TYPE_ICON[activity.type]}
                   </div>
@@ -297,7 +297,7 @@ export default function ActivityPage() {
                       </details>
                     )}
                   </div>
-                </li>
+                </>
               )}
             />
 

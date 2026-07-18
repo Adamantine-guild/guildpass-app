@@ -77,18 +77,52 @@ export default function VirtualList<T>({
     };
   }, [onScroll]);
 
-  const range = useMemo(() =>
-    getRangeForOffset({
-      total: items.length,
-      viewportHeight,
-      itemHeight: estimatedItemHeight,
-      scrollTop,
-      overscan,
-    }),
+  const range = useMemo(
+    () =>
+      getRangeForOffset({
+        total: items.length,
+        viewportHeight,
+        itemHeight: estimatedItemHeight,
+        scrollTop,
+        overscan,
+      }),
     [items.length, viewportHeight, estimatedItemHeight, scrollTop, overscan]
   );
 
   const windowItems = items.slice(range.start, range.end);
+
+  // measured heights per absolute index
+  const heightsRef = useRef<Map<number, number>>(new Map());
+  const [, forceRerender] = useState(0);
+
+  const measure = useCallback((el: HTMLElement | null, index: number) => {
+    if (!el) return;
+    const h = el.offsetHeight;
+    const prev = heightsRef.current.get(index);
+    if (prev !== h) {
+      heightsRef.current.set(index, h);
+      forceRerender((v) => v + 1);
+    }
+  }, []);
+
+  const computePaddings = useCallback(
+    (start: number, end: number) => {
+      let paddingTop = 0;
+      let paddingBottom = 0;
+      for (let i = 0; i < start; i++) {
+        const h = heightsRef.current.get(i);
+        paddingTop += h ?? estimatedItemHeight;
+      }
+      for (let i = end; i < items.length; i++) {
+        const h = heightsRef.current.get(i);
+        paddingBottom += h ?? estimatedItemHeight;
+      }
+      return { paddingTop, paddingBottom };
+    },
+    [estimatedItemHeight, items.length]
+  );
+
+  const { paddingTop, paddingBottom } = computePaddings(range.start, range.end);
 
   // Preserve viewport when new items are prepended.
   const prevLenRef = useRef(items.length);
@@ -102,13 +136,17 @@ export default function VirtualList<T>({
     const addedCount = newLen - prevLen;
     const isPrepended = addedCount > 0 && newFirstId !== prevFirstId;
     if (isPrepended) {
-      // If the user is near the top, scroll to top to reveal new items.
+      // Compute added height from measured heights when available.
+      let addedHeight = 0;
+      for (let i = 0; i < addedCount; i++) {
+        const h = heightsRef.current.get(i);
+        addedHeight += h ?? estimatedItemHeight;
+      }
       const nearTop = typeof window !== "undefined" ? window.scrollY < 100 : true;
       if (nearTop) {
         window.scrollTo({ top: 0 });
       } else {
-        // Otherwise, shift the scroll down by the added content height to preserve viewport.
-        window.scrollBy(0, addedCount * estimatedItemHeight);
+        window.scrollBy(0, addedHeight);
       }
     }
 
@@ -119,13 +157,21 @@ export default function VirtualList<T>({
   return (
     <div ref={containerRef} className={className}>
       <ul>
-        <li style={{ height: range.paddingTop }} aria-hidden />
-        {windowItems.map((item, i) => (
-          <React.Fragment key={(item as any)?.id ?? range.start + i}>
-            {renderItem(item, range.start + i)}
-          </React.Fragment>
-        ))}
-        <li style={{ height: range.paddingBottom }} aria-hidden />
+        <li style={{ height: paddingTop }} aria-hidden />
+        {windowItems.map((item, i) => {
+          const absIndex = range.start + i;
+          const key = (item as any)?.id ?? absIndex;
+          return (
+            <li
+              key={key}
+              ref={(el) => measure(el as HTMLElement | null, absIndex)}
+              className={undefined}
+            >
+              {renderItem(item, absIndex)}
+            </li>
+          );
+        })}
+        <li style={{ height: paddingBottom }} aria-hidden />
       </ul>
     </div>
   );
