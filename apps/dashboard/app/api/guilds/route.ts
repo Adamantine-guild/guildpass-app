@@ -34,7 +34,8 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "guilds:write");
+  const { getActiveGuildId } = await import("@/lib/guild-context");
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(), "guilds:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 
@@ -62,10 +63,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "guilds:write");
-  if (!guard.ok) return guard.response;
-  const { session } = guard;
-
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -74,6 +71,10 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       { field: "id", message: "id query parameter is required" },
     ]);
   }
+
+  const guard = await requireSessionAndPermission(request, id, "guilds:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   return handleApiError(async () => {
     const body = await request.json();
@@ -90,10 +91,6 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "guilds:write");
-  if (!guard.ok) return guard.response;
-  const { session } = guard;
-
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -102,6 +99,10 @@ export async function DELETE(request: Request): Promise<NextResponse> {
       { field: "id", message: "id query parameter is required" },
     ]);
   }
+
+  const guard = await requireSessionAndPermission(request, id, "guilds:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   return handleApiError(async () => {
     const guildRepository = getGuildRepository();

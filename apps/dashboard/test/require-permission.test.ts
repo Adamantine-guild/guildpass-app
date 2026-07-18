@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { guardPermission, requireSessionAndPermission } from "../lib/auth/require-permission";
 import { clearRepositories, getActivityRepository } from "../lib/repositories/factory";
 import { SESSION_ADMIN, SESSION_READONLY } from "./fixtures";
+import { DEFAULT_GUILD_ID } from "../lib/mock-data";
 
 process.env.DASHBOARD_STORAGE_MODE = "mock";
 process.env.DASHBOARD_API_MODE = "mock";
@@ -23,7 +24,7 @@ describe("permission-denied audit recording", () => {
   test("guardPermission returns ok:true and records no audit event when the session holds the permission", async () => {
     const before = await getActivityRepository().query({ type: "activity.permission_denied" });
 
-    const result = guardPermission(SESSION_ADMIN, "passes:write");
+    const result = guardPermission(SESSION_ADMIN, DEFAULT_GUILD_ID, "passes:write");
     assert.equal(result.ok, true);
 
     await flush();
@@ -32,7 +33,7 @@ describe("permission-denied audit recording", () => {
   });
 
   test("guardPermission returns a 403 response when the session lacks the permission", async () => {
-    const result = guardPermission(SESSION_READONLY, "passes:write");
+    const result = guardPermission(SESSION_READONLY, DEFAULT_GUILD_ID, "passes:write");
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.response.status, 403);
 
@@ -40,7 +41,7 @@ describe("permission-denied audit recording", () => {
   });
 
   test("guardPermission records a correctly-typed activity.permission_denied event on denial", async () => {
-    const result = guardPermission(SESSION_READONLY, "passes:write");
+    const result = guardPermission(SESSION_READONLY, DEFAULT_GUILD_ID, "passes:write");
     assert.equal(result.ok, false);
 
     await flush();
@@ -54,13 +55,13 @@ describe("permission-denied audit recording", () => {
     assert.equal(found?.severity, "warning");
     assert.equal(found?.source, "dashboard");
     assert.equal(found?.actor.name, SESSION_READONLY.name);
-    assert.equal(found?.metadata?.role, SESSION_READONLY.role);
+    assert.equal(found?.metadata?.role, SESSION_READONLY.roles[DEFAULT_GUILD_ID]);
     assert.ok(found?.description.includes("passes:write"));
   });
 
   test("guardPermission returns the 403 response synchronously, without waiting on audit recording", async () => {
     const start = Date.now();
-    const result = guardPermission(SESSION_READONLY, "members:write");
+    const result = guardPermission(SESSION_READONLY, DEFAULT_GUILD_ID, "members:write");
     const elapsed = Date.now() - start;
 
     assert.equal(result.ok, false);
@@ -80,7 +81,7 @@ describe("permission-denied audit recording", () => {
 
     let result: ReturnType<typeof guardPermission> | undefined;
     assert.doesNotThrow(() => {
-      result = guardPermission(SESSION_READONLY, "guilds:write");
+      result = guardPermission(SESSION_READONLY, DEFAULT_GUILD_ID, "guilds:write");
     });
 
     assert.equal(result?.ok, false);
@@ -101,7 +102,7 @@ describe("permission-denied audit recording", () => {
     // Mock mode resolves to MOCK_API_SESSION regardless of the request; activity:read
     // is held by every role, so this is a safe always-allowed permission to probe.
     const request = new Request("http://localhost/api/activity");
-    const result = requireSessionAndPermission(request, "activity:read");
+    const result = await requireSessionAndPermission(request, DEFAULT_GUILD_ID, "activity:read");
     assert.equal(result.ok, true);
 
     await flush();

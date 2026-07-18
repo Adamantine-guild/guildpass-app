@@ -33,13 +33,15 @@ export default async function IntegrationsPage() {
   // 1. Fetch the actual session dynamically instead of using the hardcoded mock
   const session = await getServerComponentSession();
 
+  const { DEFAULT_GUILD_ID } = await import("@/lib/mock-data");
+
   // 2. Enforce the hard boundary: only Owners and Admins can view integrations
-  const canAccessIntegrations = hasRole(session, ["owner", "admin"]);
+  const canAccessIntegrations = hasRole(session, DEFAULT_GUILD_ID, ["owner", "admin"]);
 
   if (!canAccessIntegrations) {
     return (
       <DashboardLayout title="Integrations" session={session}>
-        <AccessDenied requiredPermission="Role: owner or admin" currentRole={session.role} />
+        <AccessDenied requiredPermission="Role: owner or admin" currentRole={session.roles[DEFAULT_GUILD_ID]} />
       </DashboardLayout>
     );
   }

@@ -50,8 +50,9 @@ async function countPassesForGuild(guildId: string): Promise<number> {
 export async function POST(request: Request): Promise<NextResponse> {
   // ── Auth guard ────────────────────────────────────────────────────────────
   try {
-    const session = requireDashboardSession(request);
-    assertPermission(session, "guilds:write");
+    const { getActiveGuildId } = await import("@/lib/guild-context");
+    const session = await requireDashboardSession(request);
+    assertPermission(session, getActiveGuildId(), "guilds:write");
   } catch (err) {
     if (err instanceof PermissionDeniedError) {
       return apiError(err.message, 403);

@@ -5,9 +5,10 @@ import { guardPermission, requireSessionAndPermission } from "@/lib/auth/require
 import { getSettingsRepository } from "@/lib/repositories/factory";
 import { validateSettingsPatch } from "@/lib/validation/settings";
 import { recordDashboardActivity } from "@/lib/activity/dashboard";
+import { getActiveGuildId } from "@/lib/guild-context";
 
 export async function GET(): Promise<NextResponse> {
-  const guard = guardPermission(MOCK_API_SESSION, "settings:read");
+  const guard = guardPermission(MOCK_API_SESSION, getActiveGuildId(), "settings:read");
   if (!guard.ok) return guard.response;
 
   return handleApiError(async () => {
@@ -16,7 +17,7 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "settings:write");
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(), "settings:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 

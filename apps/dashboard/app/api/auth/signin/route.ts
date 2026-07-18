@@ -63,11 +63,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   // const siweSignature = body.siweSignature;
   // if (mode === "live") { validate SIWE ... }
 
+  const { DEFAULT_GUILD_ID } = await import("@/lib/mock-data");
   const sessionStore = getSessionStore();
   const tokens = await sessionStore.createSession({
     userId,
     name,
-    role: role as Role,
+    roles: {
+      [DEFAULT_GUILD_ID]: role as Role,
+    },
   });
 
   return apiResponse({

@@ -503,6 +503,7 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
       "Write-only secret storage is not implemented. Add a dedicated, " +
         "server-side, write-only store before persisting secret settings.",
     );
+  }
   async update(_patch: Partial<DashboardSettings>): Promise<DashboardSettings> {
     // TODO: Within transaction — read current, apply patch, call
     // this.recordDiff(previous, updated, "guild.updated", desc, "guild", "settings", name),

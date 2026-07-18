@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  apiError,
   apiUnsupported,
   apiValidationError,
   handleApiError,
@@ -71,7 +72,8 @@ function getFallbackPasses(query: PassListQuery) {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "passes:write");
+  const guildId = getActiveGuildId();
+  const guard = await requireSessionAndPermission(request, guildId, "passes:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 
@@ -89,7 +91,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const created = await passRepository.create(getActiveGuildId(), validation.data);
+    const created = await passRepository.create(guildId, validation.data);
     await recordDashboardActivity({
       type: "pass.created",
       entity: { type: "pass", id: created.id, name: created.name },
@@ -100,10 +102,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "passes:write");
-  if (!guard.ok) return guard.response;
-  const { session } = guard;
-
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -112,6 +110,28 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       { field: "id", message: "id query parameter is required" },
     ]);
   }
+
+  let session;
+  try {
+    const { requireDashboardSession } = await import("@/lib/auth/server-session");
+    session = await requireDashboardSession(request);
+  } catch (err) {
+    const { UnauthorizedError } = await import("@/lib/auth/server-session");
+    if (err instanceof UnauthorizedError) {
+      return apiError(err.message, 401);
+    }
+    throw err;
+  }
+
+  const passRepository = getPassRepository();
+  const pass = await passRepository.getById(getActiveGuildId(), id);
+  if (!pass) {
+    return apiError("Pass not found", 404);
+  }
+
+  const { guardPermission } = await import("@/lib/auth/require-permission");
+  const guard = guardPermission(session, pass.guildId, "passes:write");
+  if (!guard.ok) return guard.response;
 
   return handleApiError(async () => {
     let body: unknown;
@@ -126,8 +146,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       return apiValidationError("Invalid pass payload", validation.errors);
     }
 
-    const passRepository = getPassRepository();
-    const updated = await passRepository.update(getActiveGuildId(), id, validation.data);
+    const updated = await passRepository.update(pass.guildId, id, validation.data);
     if (!updated) throw new NotFoundError("Pass not found.");
     await recordDashboardActivity({
       type: "pass.updated",
@@ -139,10 +158,6 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "passes:write");
-  if (!guard.ok) return guard.response;
-  const { session } = guard;
-
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -152,12 +167,30 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     ]);
   }
 
+  let session;
+  try {
+    const { requireDashboardSession } = await import("@/lib/auth/server-session");
+    session = await requireDashboardSession(request);
+  } catch (err) {
+    const { UnauthorizedError } = await import("@/lib/auth/server-session");
+    if (err instanceof UnauthorizedError) {
+      return apiError(err.message, 401);
+    }
+    throw err;
+  }
+
+  const passRepository = getPassRepository();
+  const pass = await passRepository.getById(getActiveGuildId(), id);
+  if (!pass) {
+    return apiError("Pass not found", 404);
+  }
+
+  const { guardPermission } = await import("@/lib/auth/require-permission");
+  const guard = guardPermission(session, pass.guildId, "passes:write");
+  if (!guard.ok) return guard.response;
+
   return handleApiError(async () => {
-    const passRepository = getPassRepository();
-    const guildId = getActiveGuildId();
-    const pass = await passRepository.getById(guildId, id);
-    if (!pass) throw new NotFoundError("Pass not found.");
-    const success = await passRepository.delete(guildId, id);
+    const success = await passRepository.delete(pass.guildId, id);
     if (!success) throw new NotFoundError("Pass not found.");
     await recordDashboardActivity({
       type: "pass.deleted",

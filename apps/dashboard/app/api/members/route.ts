@@ -125,7 +125,7 @@ function getFallbackMembers(query: MemberListQuery) {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "members:write");
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(), "members:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 
@@ -154,7 +154,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "members:write");
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(), "members:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 
@@ -198,7 +198,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  const guard = requireSessionAndPermission(request, "members:write");
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(), "members:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 

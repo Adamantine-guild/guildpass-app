@@ -17,6 +17,8 @@ process.env.SESSION_SIGNING_SECRET = "test-signing-secret-for-server-session";
 const { resolveServerComponentSession, UnauthorizedError, resetSessionStore } =
   await import("../lib/auth/server-session");
 const { createSessionStore, clearSessionStore } = await import("../lib/auth/session-store");
+const { DEFAULT_GUILD_ID } = await import("../lib/mock-data");
+const { hasPermission } = await import("../lib/permissions");
 
 beforeEach(() => {
   resetSessionStore();
@@ -33,7 +35,9 @@ async function mintValidToken(role: Role = "admin") {
   const { accessToken } = await store.createSession({
     userId: "user-1",
     name: "Test User",
-    role,
+    roles: {
+      [DEFAULT_GUILD_ID]: role,
+    },
   });
   return accessToken;
 }
@@ -43,22 +47,22 @@ describe("resolveServerComponentSession — valid session", () => {
     const token = await mintValidToken("admin");
     const session = await resolveServerComponentSession(token, null);
     assert.equal(session.userId, "user-1");
-    assert.equal(session.role, "admin");
-    assert.ok(session.permissions.includes("settings:write"));
+    assert.equal(session.roles[DEFAULT_GUILD_ID], "admin");
+    assert.ok(hasPermission(session, DEFAULT_GUILD_ID, "settings:write"));
   });
 
   test("falls back to a valid Bearer header when no cookie", async () => {
     const token = await mintValidToken("readonly");
     const session = await resolveServerComponentSession(null, `Bearer ${token}`);
-    assert.equal(session.role, "readonly");
-    assert.equal(session.permissions.includes("settings:write"), false);
+    assert.equal(session.roles[DEFAULT_GUILD_ID], "readonly");
+    assert.equal(hasPermission(session, DEFAULT_GUILD_ID, "settings:write"), false);
   });
 
   test("cookie takes precedence over header", async () => {
     const cookieToken = await mintValidToken("owner");
     const headerToken = await mintValidToken("readonly");
     const session = await resolveServerComponentSession(cookieToken, `Bearer ${headerToken}`);
-    assert.equal(session.role, "owner");
+    assert.equal(session.roles[DEFAULT_GUILD_ID], "owner");
   });
 });
 

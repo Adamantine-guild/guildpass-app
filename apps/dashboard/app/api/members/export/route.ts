@@ -14,10 +14,10 @@ import { MEMBER_CSV_HEADERS, memberToCsvRow } from "@/lib/members-csv";
  * Requires `members:read` permission, same as the paginated member list.
  */
 export async function GET(request: Request): Promise<Response> {
-  const guard = requireSessionAndPermission(request, "members:read");
+  const guildId = getActiveGuildId();
+  const guard = await requireSessionAndPermission(request, guildId, "members:read");
   if (!guard.ok) return guard.response;
 
-  const guildId = getActiveGuildId();
   const repo = getMemberRepository();
 
   const encoder = new TextEncoder();

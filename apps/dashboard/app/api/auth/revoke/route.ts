@@ -20,10 +20,9 @@ import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    const { getActiveGuildId } = await import("@/lib/guild-context");
     const session = await requireDashboardSession(request);
-    // Any authenticated user can revoke a session.
-    // For admin-controlled revocation, add an additional permission check.
-    assertPermission(session, "members:write");
+    assertPermission(session, getActiveGuildId(), "members:write");
   } catch (err) {
     if (err instanceof PermissionDeniedError) {
       return apiError(err.message, 403);
@@ -70,9 +69,9 @@ export async function POST(request: Request): Promise<NextResponse> {
  */
 export async function PUT(request: Request): Promise<NextResponse> {
   try {
+    const { getActiveGuildId } = await import("@/lib/guild-context");
     const session = await requireDashboardSession(request);
-    // Revoking all sessions is a privileged operation.
-    assertPermission(session, "members:write");
+    assertPermission(session, getActiveGuildId(), "members:write");
   } catch (err) {
     if (err instanceof PermissionDeniedError) {
       return apiError(err.message, 403);

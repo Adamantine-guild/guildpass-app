@@ -13,24 +13,21 @@
  *  - Server-session integration (live mode token extraction)
  */
 
-import { describe, test, beforeEach, afterEach } from "node:test";
+import { describe, test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   createSessionStore,
   clearSessionStore,
   ACCESS_TOKEN_TTL,
-  REFRESH_TOKEN_TTL,
   type SessionStore,
   type TokenPair,
 } from "../lib/auth/session-store.ts";
 import { ROLE_PERMISSIONS } from "../lib/auth/session.ts";
-import type { Role, Session } from "../lib/auth/session.ts";
+import type { Role } from "../lib/auth/session.ts";
+import { DEFAULT_GUILD_ID } from "../lib/mock-data.ts";
+import { hasPermission } from "../lib/permissions.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Sign in a test user and return the token pair.
@@ -39,7 +36,9 @@ async function signIn(store: SessionStore, role: Role = "admin"): Promise<TokenP
   return store.createSession({
     userId: "test-user-001",
     name: "Test User",
-    role,
+    roles: {
+      [DEFAULT_GUILD_ID]: role,
+    },
   });
 }
 
@@ -67,18 +66,16 @@ describe("SessionStore — issuance", () => {
     assert.ok(session, "should return a valid session");
     assert.equal(session!.userId, "test-user-001");
     assert.equal(session!.name, "Test User");
-    assert.equal(session!.role, "admin");
-    assert.deepEqual(session!.permissions, ROLE_PERMISSIONS.admin);
+    assert.equal(session!.roles[DEFAULT_GUILD_ID], "admin");
+    assert.ok(hasPermission(session!, DEFAULT_GUILD_ID, "passes:write"));
   });
 
   test("access token for a different role has correct permissions", async () => {
     const tokens = await signIn(store, "readonly");
     const session = await store.validateAccessToken(tokens.accessToken);
     assert.ok(session);
-    assert.equal(session!.role, "readonly");
-    assert.deepEqual(session!.permissions, ROLE_PERMISSIONS.readonly);
-    // Should NOT have write permission
-    assert.equal(session!.permissions.includes("passes:write"), false);
+    assert.equal(session!.roles[DEFAULT_GUILD_ID], "readonly");
+    assert.equal(hasPermission(session!, DEFAULT_GUILD_ID, "passes:write"), false);
   });
 
   test("session records are stored server-side", async () => {
@@ -140,7 +137,9 @@ describe("SessionStore — access token validation", () => {
     const t2 = await store.createSession({
       userId: "test-user-002",
       name: "User Two",
-      role: "moderator",
+      roles: {
+        [DEFAULT_GUILD_ID]: "moderator",
+      },
     });
     assert.notEqual(t1.accessToken, t2.accessToken);
     assert.notEqual(t1.refreshToken, t2.refreshToken);
@@ -231,7 +230,9 @@ describe("SessionStore — explicit revocation", () => {
     const t2 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
 
     const sessions = await store.getUserSessions("test-user-001");
@@ -295,13 +296,14 @@ describe("SessionStore — role-change invalidation", () => {
     const tokens2 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "readonly", // downgraded role
+      roles: {
+        [DEFAULT_GUILD_ID]: "readonly", // downgraded role
+      },
     });
 
     const session = await store.validateAccessToken(tokens2.accessToken);
     assert.ok(session);
-    assert.equal(session!.role, "readonly", "new session should reflect new role");
-    assert.deepEqual(session!.permissions, ROLE_PERMISSIONS.readonly);
+    assert.equal(session!.roles[DEFAULT_GUILD_ID], "readonly", "new session should reflect new role");
   });
 
   test("invalidation bumps generation for multiple calls", async () => {
@@ -328,20 +330,6 @@ describe("SessionStore — staleness bound", () => {
   });
 
   test("the staleness bound is documented as the access-token lifetime", () => {
-    // This test encodes the documented contract: after revocation or role
-    // change, the maximum window of stale-permission access is the
-    // access-token lifetime (15 minutes).
-    //
-    // Why: Access tokens are stateless — once issued, they carry their
-    // own expiry and aren't checked against the session store on every
-    // request. The server-side check happens at refresh time. So if a
-    // user is demoted, their existing access token (issued with old
-    // role) remains valid until it expires. The stale window is therefore
-    // bounded by ACCESS_TOKEN_TTL.
-    //
-    // This is the accepted trade-off: accepting a <15 min staleness
-    // window in exchange for not hitting the session store on every
-    // single API request.
     const STALENESS_BOUND_SECONDS = ACCESS_TOKEN_TTL;
     const STALENESS_BOUND_MINUTES = STALENESS_BOUND_SECONDS / 60;
 
@@ -353,7 +341,6 @@ describe("SessionStore — staleness bound", () => {
   });
 
   test("after revocation, existing access token still works until expiry", async () => {
-    // This verifies the documented staleness-bound behaviour.
     const tokens = await signIn(store);
     const sessions = await store.getUserSessions("test-user-001");
 
@@ -364,7 +351,7 @@ describe("SessionStore — staleness bound", () => {
     // staleness window in action.
     const session = await store.validateAccessToken(tokens.accessToken);
     assert.ok(session, "existing access token should still work after revocation");
-    assert.equal(session!.role, "admin", "stale role still present in token");
+    assert.equal(session!.roles[DEFAULT_GUILD_ID], "admin", "stale role still present in token");
   });
 
   test("after role-change invalidation, existing access token still works until expiry", async () => {
@@ -376,7 +363,7 @@ describe("SessionStore — staleness bound", () => {
     // Access token still works (stale role)
     const session = await store.validateAccessToken(tokens.accessToken);
     assert.ok(session);
-    assert.equal(session!.role, "admin", "stale admin role still in token");
+    assert.equal(session!.roles[DEFAULT_GUILD_ID], "admin", "stale admin role still in token");
 
     // But refresh is denied
     const refreshed = await store.refreshSession(tokens.refreshToken);
@@ -409,8 +396,8 @@ describe("Server-session integration", () => {
 
     const session = await store.validateAccessToken(parts[1]);
     assert.ok(session);
-    assert.equal(session!.role, "admin");
-    assert.deepEqual(session!.permissions, ROLE_PERMISSIONS.admin);
+    assert.equal(session!.roles[DEFAULT_GUILD_ID], "admin");
+    assert.ok(hasPermission(session!, DEFAULT_GUILD_ID, "settings:write"));
   });
 
   test("a missing Authorization header produces null", async () => {
@@ -426,22 +413,6 @@ describe("Server-session integration", () => {
     const authHeader = request.headers.get("Authorization");
     const parts = authHeader!.split(" ");
     assert.notEqual(parts[0].toLowerCase(), "bearer");
-  });
-
-  test("an expired access token is rejected", async () => {
-    // Create session then manually construct an expired token scenario.
-    // We test this indirectly: the validateAccessToken function checks
-    // the exp claim, so we verify that a token with a past exp is
-    // rejected.
-    const tokens = await signIn(store);
-
-    // Decode and verify the token has a valid expiry
-    const session = await store.validateAccessToken(tokens.accessToken);
-    assert.ok(session, "fresh token should be valid");
-
-    // Verify that a completely fabricated expired claim would fail.
-    // This is covered by the validateAccessToken returning null for
-    // garbage tokens in the earlier tests.
   });
 });
 
@@ -460,12 +431,16 @@ describe("SessionStore — multiple sessions", () => {
     const t2 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
     const t3 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
 
     const sessions = await store.getUserSessions("test-user-001");
@@ -477,12 +452,16 @@ describe("SessionStore — multiple sessions", () => {
     const t2 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
     const t3 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
 
     await store.invalidateUserSessions("test-user-001");
@@ -496,7 +475,9 @@ describe("SessionStore — multiple sessions", () => {
     const t4 = await store.createSession({
       userId: "test-user-001",
       name: "Test User",
-      role: "readonly",
+      roles: {
+        [DEFAULT_GUILD_ID]: "readonly",
+      },
     });
     assert.ok(t4.accessToken);
   });
@@ -516,12 +497,16 @@ describe("SessionStore — edge cases", () => {
     const user1 = await store.createSession({
       userId: "user-1",
       name: "User One",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
     const user2 = await store.createSession({
       userId: "user-2",
       name: "User Two",
-      role: "readonly",
+      roles: {
+        [DEFAULT_GUILD_ID]: "readonly",
+      },
     });
 
     // Validate both tokens independently
@@ -529,21 +514,25 @@ describe("SessionStore — edge cases", () => {
     const s2 = await store.validateAccessToken(user2.accessToken);
 
     assert.equal(s1!.userId, "user-1");
-    assert.equal(s1!.role, "admin");
+    assert.equal(s1!.roles[DEFAULT_GUILD_ID], "admin");
     assert.equal(s2!.userId, "user-2");
-    assert.equal(s2!.role, "readonly");
+    assert.equal(s2!.roles[DEFAULT_GUILD_ID], "readonly");
   });
 
   test("invalidating user-1 does not affect user-2", async () => {
     const user1 = await store.createSession({
       userId: "user-1",
       name: "User One",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
     const user2 = await store.createSession({
       userId: "user-2",
       name: "User Two",
-      role: "admin",
+      roles: {
+        [DEFAULT_GUILD_ID]: "admin",
+      },
     });
 
     await store.invalidateUserSessions("user-1");

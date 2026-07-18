@@ -3,6 +3,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Session } from "@/lib/auth/session";
 
+import { DEFAULT_GUILD_ID } from "@/lib/mock-data";
+
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: "📊" },
   { name: "Passes",    href: "/passes",    icon: "🎫" },
@@ -26,7 +28,8 @@ const ROLE_BADGE: Record<
 
 export default function Sidebar({ session }: { session?: Session }) {
   const pathname = usePathname();
-  const badge = session ? ROLE_BADGE[session.role] : null;
+  const activeRole = session?.roles?.[DEFAULT_GUILD_ID] ?? "readonly";
+  const badge = session ? ROLE_BADGE[activeRole] : null;
 
   return (
     <div className="w-64 bg-slate-900 text-white h-screen flex flex-col fixed left-0 top-0">

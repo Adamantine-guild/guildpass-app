@@ -42,9 +42,10 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Extract user metadata from the (possibly expired) access token.
-  // We only need name and role to construct the new access token.
+  // We only need name and roles to construct the new access token.
   let currentName = "unknown";
-  let currentRole: Role = "readonly";
+  const { DEFAULT_GUILD_ID } = await import("@/lib/mock-data");
+  let currentRoles: Record<string, Role> = { [DEFAULT_GUILD_ID]: "readonly" };
 
   if (accessToken) {
     const sessionStore = getSessionStore();
@@ -57,7 +58,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         const payloadJson = Buffer.from(payloadB64, "base64").toString("utf-8");
         const payload = JSON.parse(payloadJson);
         if (payload.name) currentName = payload.name;
-        if (payload.role) currentRole = payload.role as Role;
+        if (payload.roles) currentRoles = payload.roles as Record<string, Role>;
       }
     } catch {
       // If the access token is completely malformed, fall back to defaults.
@@ -70,7 +71,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     sessionStore,
     refreshToken,
     currentName,
-    currentRole,
+    currentRoles,
   );
 
   if (!tokens) {

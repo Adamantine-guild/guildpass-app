@@ -1,9 +1,15 @@
-# GuildPass Dashboard — Permission Model
+# GuildPass Dashboard — Scoped Permission Model (RBAC)
 
-This document describes the role-based access control (RBAC) system implemented
-in the GuildPass dashboard. It covers supported roles, their permissions, how to
-switch the active mock role during development, and guidance for wiring up real
-authentication in production.
+This document describes the per-guild role-based access control (RBAC) system implemented in the GuildPass dashboard. It covers the scoped roles design, the session model, permission checking helpers, API route boundaries, and how mock sessions work during local development.
+
+---
+
+## The Scoped RBAC Architecture
+
+Prior versions used a single global role model (e.g. a user was an "admin" globally across all guilds). To support true multi-tenancy, the dashboard implements a **per-guild scoped RBAC model**:
+- A user's privileges are scoped to a specific guild (represented by a `guildId`).
+- A user can be an `admin` of Guild A but only have `readonly` access to Guild B.
+- All permission checks require a `guildId` context.
 
 ---
 
@@ -13,14 +19,32 @@ The dashboard recognises four roles, ordered from most to least privileged:
 
 | Role | Description |
 |------|-------------|
-| `owner` | Guild creator / contract deployer. Full read + write access. |
-| `admin` | Full read + write access. Functionally identical to owner in this matrix. |
-| `moderator` | Can read all resources and manage members, but cannot create/edit passes or change workspace settings. |
-| `readonly` | Read-only access across all resources. Cannot trigger any mutation. |
+| `owner` | Guild creator / contract deployer. Full read + write access to the guild. |
+| `admin` | Full read + write access to the guild. Functionally identical to owner. |
+| `moderator` | Scoped read access, plus ability to write member data (`members:write`). Cannot edit passes, settings, or guild metadata. |
+| `readonly` | Read-only access across the guild. Cannot trigger any mutation. |
+
+---
+
+## Session Model & Scoped Roles
+
+The `Session` object is serialized and stored in an access token (JWT payload). Instead of a single global `role` field, it contains a dictionary mapping guild IDs to the user's role in that guild:
+
+```ts
+export interface Session {
+  userId: string;
+  name: string;
+  roles: Record<string, Role>; // guildId -> Role mapping
+}
+```
+
+For the local single-guild development flow, the mock sessions map the default role to `DEFAULT_GUILD_ID` (which is `"1"`).
 
 ---
 
 ## Permission Matrix
+
+Permissions are represented by strings formatted as `<resource>:<action>` (e.g., `passes:write`). The canonical source of truth mapping roles to permissions is the `ROLE_PERMISSIONS` matrix in `apps/dashboard/lib/auth/session.ts`:
 
 | Permission | owner | admin | moderator | readonly |
 |------------|:-----:|:-----:|:---------:|:--------:|
@@ -32,213 +56,82 @@ The dashboard recognises four roles, ordered from most to least privileged:
 | `guilds:write` | ✅ | ✅ | ❌ | ❌ |
 | `settings:read` | ✅ | ✅ | ✅ | ✅ |
 | `settings:write` | ✅ | ✅ | ❌ | ❌ |
+| `activity:read` | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
-## Named Helper Functions
+## Scoped Helper Functions
 
-All UI gating and API enforcement uses named helpers from
-`apps/dashboard/lib/permissions.ts`. Import from there — do **not** call
-`session.permissions.includes(...)` directly.
+All UI gating and API enforcement uses named helper functions from `apps/dashboard/lib/permissions.ts`. Every helper accepts a `guildId` context:
 
-| Helper | Guards |
-|--------|--------|
-| `canManagePasses(session)` | `passes:write` |
-| `canManageMembers(session)` | `members:write` |
-| `canManageGuilds(session)` | `guilds:write` |
-| `canEditSettings(session)` | `settings:write` |
-| `hasPermission(session, perm)` | Any arbitrary permission string |
-| `assertPermission(session, perm)` | Server-side guard — throws `PermissionDeniedError` (HTTP 403) |
-
----
-
-## UI Enforcement Summary
-
-| Page | Read-only behaviour | Write behaviour |
-|------|---------------------|-----------------|
-| **Passes** | Table always visible | "Create Pass" button + Edit/Deactivate row actions hidden |
-| **Members** | Table always visible | "Invite Member" button + Change Role/Remove row actions hidden |
-| **Settings** | Page visible, all inputs `disabled`, amber read-only banner shown, Save hidden | All inputs enabled, Save button visible, submits via PATCH /api/settings |
-| **Guilds** | Cards always visible | No write actions implemented yet |
-| **Sidebar** | Role badge shown for all roles | N/A |
+| Helper | Required Permission |
+|--------|---------------------|
+| `canManagePasses(session, guildId)` | `passes:write` |
+| `canManageMembers(session, guildId)` | `members:write` |
+| `canManageGuilds(session, guildId)` | `guilds:write` |
+| `canViewActivity(session, guildId)` | `activity:read` |
+| `canEditSettings(session, guildId)` | `settings:write` |
+| `hasPermission(session, guildId, perm)` | Scoped check for any arbitrary permission |
+| `hasRole(session, guildId, allowedRoles)` | Scoped check if user's role is in the list |
+| `assertPermission(session, guildId, perm)` | Server-side guard — throws `PermissionDeniedError` on failure |
 
 ---
 
-## API Enforcement
+## API Route Enforcement
 
-Every mutation route handler calls `assertPermission` **before** executing any
-logic, using `MOCK_API_SESSION` (see "Two independent mock sessions" below). If
-the session lacks the required permission, `assertPermission` throws
-`PermissionDeniedError`, which the handler catches and converts to a `403` JSON
-response.
-POST /api/passes     → requires passes:write
+Backend route handlers are the authoritative security boundary. They resolve the session and target `guildId` dynamically before performing any mutations:
 
-DELETE /api/passes   → requires passes:write
+1. **Authentication**: Resolves the user's `Session` from the request token.
+2. **Guild Scope Resolution**:
+   - For route mutations affecting a specific entity (e.g., `PATCH` / `DELETE` on a Pass), the handler first retrieves the target resource (like the Pass itself) from the database to obtain its owning `guildId`.
+   - For creations (e.g. `POST /api/passes`), the `guildId` is derived from the payload or the current active context (`getActiveGuildId()`).
+3. **Assertion**: Calls `guardPermission` or `assertPermission` with the resolved `guildId`.
 
-POST /api/members    → requires members:write
-
-DELETE /api/members  → requires members:write
-
-POST /api/guilds     → requires guilds:write
-
-DELETE /api/guilds   → requires guilds:write
-
-PATCH /api/settings  → requires settings:write
-
-> **Important:** UI hiding (hiding buttons) is a UX convenience only. The API
-> layer is the authoritative security boundary. Both layers enforce the same
-> permissions independently (defence in depth).
-
-Currently, the **Settings** page is wired end-to-end: clicking "Save Changes"
-calls `PATCH /api/settings`, and a `403` response (lack of `settings:write`)
-is surfaced to the user as an "Access denied" alert. **Passes** and **Members**
-have enforcement-ready API routes (`POST`/`DELETE`), but their UI buttons are
-not yet wired to call them — this is tracked as a fast-follow, not a gap in
-the permission model itself.
+### API Enforcement Mapping
+- `POST /api/passes` → resolves `guildId` from active context/body → guards `passes:write`
+- `PATCH /api/passes?id=...` → fetches pass to get `guildId` → guards `passes:write`
+- `DELETE /api/passes?id=...` → fetches pass to get `guildId` → guards `passes:write`
+- `POST /api/members` → resolves `guildId` from active context → guards `members:write`
+- `PATCH /api/members?id=...` → resolves `guildId` from active context → guards `members:write`
+- `DELETE /api/members?id=...` → resolves `guildId` from active context → guards `members:write`
+- `POST /api/guilds` → resolves `guildId` from active context → guards `guilds:write`
+- `PATCH /api/guilds?id=...` → resolves `guildId` from query parameter → guards `guilds:write`
+- `DELETE /api/guilds?id=...` → resolves `guildId` from query parameter → guards `guilds:write`
+- `PATCH /api/settings` → resolves `guildId` from active context → guards `settings:write`
 
 ---
 
-## Two independent mock sessions (UI vs API)
+## Audit Logs (Permission Denials)
 
-There are two separate mock session constants in `lib/auth/session.ts`,
-deliberately kept independent so the API layer's enforcement can be
-demonstrated as genuinely separate from whatever the UI displays:
+When `guardPermission` or `requireSessionAndPermission` detects a permission violation, it automatically logs a fire-and-forget `activity.permission_denied` audit event recording the actor details, the target `guildId`, the missing permission, and the user's role in that guild. This audit log operation is non-blocking to prevent delays in sending the HTTP 403 response.
 
-| Constant | Used by | Purpose |
-|----------|---------|---------|
-| `MOCK_ACTIVE_ROLE` / `MOCK_SESSION` | `useSession()` (pages, UI gating) | Controls what buttons/inputs render |
-| `MOCK_API_ROLE` / `MOCK_API_SESSION` | All `app/api/**/route.ts` mutation handlers | Controls what the backend actually allows |
+---
 
-By default both point at the same role. To **prove** the backend doesn't just
-trust the frontend, set them differently:
+## Switching the Active Mock Role during Development
+
+For local mock mode development, the UI uses the active mock session defined in `apps/dashboard/lib/auth/session.ts`:
 
 ```ts
-// lib/auth/session.ts
-export const MOCK_ACTIVE_ROLE: Role = "admin";    // UI: shows all write buttons
-export const MOCK_API_ROLE: Role    = "readonly"; // API: rejects every mutation with 403
+// apps/dashboard/lib/auth/session.ts
+export const MOCK_ACTIVE_ROLE: Role = "readonly"; // Change to "owner" | "admin" | "moderator"
 ```
 
-With that configuration, the Settings page will show the Save button (UI
-thinks you're an admin), but clicking it will return a 403 and show "Access
-denied" (the API independently checked and disagreed). This is the
-demonstrable proof that enforcement does not rely on the UI alone.
-
----
-
-## Switching the Active Mock Role
-
-During development the active **UI** session is controlled by a single
-constant in `apps/dashboard/lib/auth/session.ts`:
-
-```ts
-// Change this to test a different role in the UI
-export const MOCK_ACTIVE_ROLE: Role = "readonly";
-//                                     ↑ "owner" | "admin" | "moderator" | "readonly"
-```
-
-After changing the value, save the file. Next.js hot-reload picks up the change
-automatically — no server restart needed. To test the **API** layer
-independently, change `MOCK_API_ROLE` instead (see above).
-
-### Quick verification checklist
-
-| Role | Expected behaviour |
-|------|--------------------|
-| `readonly` | Settings inputs disabled + banner; no Create/Invite buttons; no row actions |
-| `moderator` | Members Invite + row actions visible; Passes/Settings write actions still hidden |
-| `admin` | All write controls visible; Settings fully editable |
-| `owner` | Identical to admin |
+To demonstrate backend API enforcement independently, you can change `MOCK_API_ROLE` in the same file. For example, setting `MOCK_ACTIVE_ROLE = "admin"` (UI displays all buttons) and `MOCK_API_ROLE = "readonly"` (API rejects all writes with 403) validates that frontend presentation checks cannot bypass backend enforcement.
 
 ---
 
 ## Production Migration Guide
 
-When real authentication is ready, make the following changes (and nothing else
-in the permission layer itself):
+When transitioning to production, the scoped RBAC structure requires no changes to page gating or repositories. Implement the following:
 
-### 1. Replace `useSession` hook
-
-`apps/dashboard/lib/hooks/useSession.ts` currently returns `MOCK_SESSION`.
-Replace the body with your real auth SDK:
-
-```ts
-// Example: next-auth
-import { useSession as useNextAuth } from "next-auth/react";
-
-export function useSession(): Session {
-  const { data } = useNextAuth();
-  return data?.user as Session;
-}
-```
-
-### 2. Replace `MOCK_API_SESSION` in API routes
-
-Each API route handler currently imports `MOCK_API_SESSION`. Replace it with a
-real session resolved from the incoming request:
-
-```ts
-// Example: extract from request headers / JWT
-const session = await getSessionFromRequest(request);
-assertPermission(session, "passes:write");
-```
-
-### 3. No changes needed in
-
-- `lib/permissions.ts` — helpers work on any `Session` object
-- `lib/auth/session.ts` — the `Role`, `Permission`, and `ROLE_PERMISSIONS`
-  types remain the canonical source of truth
-- Any UI page — they call `useSession()` which is already the swap point
+1. **JWT Customization**: Customize token creation (in `apps/dashboard/lib/auth/session-store.ts`) to fetch roles for all joined guilds from the database and serialize them in the `roles` Record within the JWT payload.
+2. **Session Resolver Hook**: Replace the client-side `useSession` hook in `apps/dashboard/lib/hooks/useSession.ts` (currently returning `MOCK_SESSION`) to fetch the active session from your authentication provider.
 
 ---
 
 ## File Reference
-apps/dashboard/
 
-├── lib/
-
-│   ├── auth/
-
-│   │   └── session.ts          ← Role types, Session interface, ROLE_PERMISSIONS,
-
-│   │                              mock sessions, MOCK_SESSION (UI) + MOCK_API_SESSION (API)
-
-│   ├── permissions.ts          ← hasPermission, canManage*, assertPermission
-
-│   └── hooks/
-
-│       └── useSession.ts       ← Client hook (swap point for real auth)
-
-├── components/
-
-│   ├── DashboardLayout.tsx     ← Forwards session prop to Sidebar
-
-│   └── Sidebar.tsx             ← Displays role badge
-
-└── app/
-
-├── passes/page.tsx         ← Gated by canManagePasses (UI only, not yet wired to API)
-
-├── members/page.tsx        ← Gated by canManageMembers (UI only, not yet wired to API)
-
-├── settings/page.tsx       ← Gated by canEditSettings; Save wired to PATCH /api/settings
-
-└── api/
-
-├── passes/route.ts     ← POST/DELETE guarded by assertPermission(MOCK_API_SESSION, ...)
-
-├── members/route.ts    ← POST/DELETE guarded by assertPermission(MOCK_API_SESSION, ...)
-
-├── guilds/route.ts     ← POST/DELETE guarded by assertPermission(MOCK_API_SESSION, ...)
-
-└── settings/route.ts   ← PATCH guarded by assertPermission(MOCK_API_SESSION, ...)
-
----
-
-## Related: Multi-Tenant Data Isolation
-
-RBAC governs **who** may act; guild scoping governs **which data** they may
-act on. The repository layer structurally enforces that every pass/member
-query is scoped to a single guild, so an admin of one guild can never read
-or modify another guild's data — even through a buggy route handler. See
-[multi-tenancy.md](multi-tenancy.md) for the full isolation guarantee and
-its contract tests.
+- `apps/dashboard/lib/auth/session.ts` — Definition of `Role`, `Permission`, `Session`, `ROLE_PERMISSIONS` and mock sessions.
+- `apps/dashboard/lib/auth/session-store.ts` — JWT sign, verify, refresh, metadata extraction, and server-side session store.
+- `apps/dashboard/lib/permissions.ts` — Pure permission helper functions (`hasPermission`, `hasRole`, `assertPermission`).
+- `apps/dashboard/lib/auth/require-permission.ts` — Middleware wrapper functions (`guardPermission`, `requireSessionAndPermission`) and audit event recording.

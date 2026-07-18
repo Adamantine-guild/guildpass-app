@@ -16,45 +16,52 @@
  */
 
 import type { Session, Permission } from "@/lib/auth/session";
+import { ROLE_PERMISSIONS } from "@/lib/auth/session";
 
 // ── Core check ────────────────────────────────────────────────────────────────
 
 /**
- * Returns true if the session holds the requested permission.
+ * Returns true if the session holds the requested permission for the given guild.
  * This is the single primitive all other helpers delegate to.
  */
-export function hasPermission(session: Session, permission: Permission): boolean {
-  return session.permissions.includes(permission);
+export function hasPermission(session: Session, guildId: string, permission: Permission): boolean {
+  if (!session || !session.roles) return false;
+  const role = session.roles[guildId];
+  if (!role) return false;
+  return ROLE_PERMISSIONS[role].includes(permission);
 }
 
 /**
- * Returns true if the session user holds one of the allowed roles.
+ * Returns true if the session user holds one of the allowed roles in the given guild.
  */
-export function hasRole(session: Session, allowedRoles: string[]): boolean {
-  return allowedRoles.includes(session.role);
+export function hasRole(session: Session, guildId: string, allowedRoles: string[]): boolean {
+  if (!session || !session.roles) return false;
+  const role = session.roles[guildId];
+  if (!role) return false;
+  return allowedRoles.includes(role);
 }
 
 // ── Named helpers (UI gating) ─────────────────────────────────────────────────
 
 /** Can the user create, edit, or delete passes? */
-export const canManagePasses = (session: Session): boolean =>
-  hasPermission(session, "passes:write");
+export const canManagePasses = (session: Session, guildId: string): boolean =>
+  hasPermission(session, guildId, "passes:write");
 
 /** Can the user invite, remove, or change roles of members? */
-export const canManageMembers = (session: Session): boolean =>
-  hasPermission(session, "members:write");
+export const canManageMembers = (session: Session, guildId: string): boolean =>
+  hasPermission(session, guildId, "members:write");
 
 /** Can the user edit guild metadata (name, description, etc.)? */
-export const canManageGuilds = (session: Session): boolean =>
-  hasPermission(session, "guilds:write");
+export const canManageGuilds = (session: Session, guildId: string): boolean =>
+  hasPermission(session, guildId, "guilds:write");
 
 /** Can the user view dashboard activity? */
-export const canViewActivity = (session: Session): boolean =>
-  hasPermission(session, "activity:read");
+export const canViewActivity = (session: Session, guildId: string): boolean =>
+  hasPermission(session, guildId, "activity:read");
 
 /** Can the user save changes on the Settings page? */
-export const canEditSettings = (session: Session): boolean =>
-  hasPermission(session, "settings:write");
+export const canEditSettings = (session: Session, guildId: string): boolean =>
+  hasPermission(session, guildId, "settings:write");
 
 // ── Server-side assertion (API route guard) ───────────────────────────────────
 
@@ -76,18 +83,10 @@ export class PermissionDeniedError extends Error {
 }
 
 /**
- * Throws PermissionDeniedError if the session does not hold `permission`.
- *
- * Usage in an API route handler:
- * ```ts
- * assertPermission(MOCK_SESSION, "passes:write");
- * ```
- *
- * In production, pair this with a real session resolved from the request
- * headers / JWT / cookie before calling assertPermission.
+ * Throws PermissionDeniedError if the session does not hold `permission` in `guildId`.
  */
-export function assertPermission(session: Session, permission: Permission): void {
-  if (!hasPermission(session, permission)) {
+export function assertPermission(session: Session, guildId: string, permission: Permission): void {
+  if (!hasPermission(session, guildId, permission)) {
     throw new PermissionDeniedError(permission);
   }
 }
