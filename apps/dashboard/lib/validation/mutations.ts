@@ -17,7 +17,9 @@ export type MemberUpdateInput = z.infer<typeof memberUpdateSchema>;
 
 const PASS_STATUSES = ["active", "inactive", "draft"] as const;
 const MEMBER_STATUSES = ["active", "inactive", "pending"] as const;
-const SERVER_OWNED_FIELDS = ["id", "createdAt"] as const;
+// guildId is server-owned: the tenant scope comes from the server-side guild
+// context, never from the payload (see docs/multi-tenancy.md).
+const SERVER_OWNED_FIELDS = ["id", "createdAt", "guildId"] as const;
 const WALLET_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -17,6 +17,7 @@ model ProcessedEvent {
   status          String   @default("processed") // e.g., processed, reverted
   eventType       String
   data            Json
+  previousState   Json?
   fencingToken    Int      @default(0) // Monotonically increasing leader generation
   createdAt       DateTime @default(now())
 

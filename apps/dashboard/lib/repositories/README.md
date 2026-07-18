@@ -11,6 +11,19 @@ The dashboard uses a **repository pattern** to abstract data storage, enabling s
 
 All storage access is **server-side only** — repositories are never exposed to client-side JavaScript.
 
+## Multi-Tenant Isolation
+
+Passes and members belong to exactly one guild (tenant). Every
+`IPassRepository`/`IMemberRepository` method requires an explicit `guildId`
+as its first parameter, so guild-unscoped queries are a **compile error**,
+not a runtime possibility. A call scoped to guild A structurally cannot
+read, modify, or delete guild B's data — even when handed an ID or wallet
+that exists in another guild. This guarantee is enforced against every
+adapter (mock included) by the isolation contract suites in
+[test/repositories/contracts.ts](../../test/repositories/contracts.ts).
+See [docs/multi-tenancy.md](../../../../docs/multi-tenancy.md) for the full
+policy.
+
 ## Architecture
 
 ```
@@ -38,12 +51,13 @@ All storage access is **server-side only** — repositories are never exposed to
 
 ```typescript
 import { apiResponse } from "@/lib/api-helpers";
+import { getActiveGuildId } from "@/lib/guild-context";
 import { getPassRepository } from "@/lib/repositories";
 
 // In an API route or server component:
 export async function GET() {
   const passRepository = getPassRepository();
-  const passes = await passRepository.getAll();
+  const passes = await passRepository.getAll(getActiveGuildId());
   return apiResponse(passes);
 }
 ```
@@ -52,7 +66,7 @@ export async function GET() {
 
 ```typescript
 const repo = getPassRepository();
-const newPass = await repo.create({
+const newPass = await repo.create(getActiveGuildId(), {
   name: "VIP Pass",
   price: 10.0,
   description: "Exclusive access",
@@ -63,7 +77,8 @@ const newPass = await repo.create({
 
 ```typescript
 const memberRepo = getMemberRepository();
-const member = await memberRepo.getByWallet("0x123abc...");
+// Scoped lookup: only resolves members of the given guild.
+const member = await memberRepo.getByWallet(getActiveGuildId(), "0x123abc...");
 if (member) {
   console.log(`Found member: ${member.name}`);
 }
@@ -95,13 +110,17 @@ if (result === "duplicate") {
 
 ### IPassRepository
 
+All methods are guild-scoped; a mismatched `guildId` behaves exactly like a
+missing record.
+
 ```typescript
 interface IPassRepository {
-  getAll(): Promise<Pass[]>;
-  getById(id: string): Promise<Pass | null>;
-  create(pass: Omit<Pass, "id" | "createdAt">): Promise<Pass>;
-  update(id: string, pass: Partial<Pass>): Promise<Pass | null>;
-  delete(id: string): Promise<boolean>;
+  getAll(guildId: string): Promise<Pass[]>;
+  query(guildId: string, options?: PassListQuery): Promise<PaginatedResult<Pass>>;
+  getById(guildId: string, id: string): Promise<Pass | null>;
+  create(guildId: string, pass: PassCreateData): Promise<Pass>;
+  update(guildId: string, id: string, pass: PassUpdateData): Promise<Pass | null>;
+  delete(guildId: string, id: string): Promise<boolean>;
 }
 ```
 
@@ -119,14 +138,18 @@ interface IGuildRepository {
 
 ### IMemberRepository
 
+All methods are guild-scoped; a mismatched `guildId` (or a wallet that only
+exists in another guild) behaves exactly like a missing record.
+
 ```typescript
 interface IMemberRepository {
-  getAll(): Promise<Member[]>;
-  getById(id: string): Promise<Member | null>;
-  getByWallet(wallet: string): Promise<Member | null>;
-  create(member: Omit<Member, "id">): Promise<Member>;
-  update(id: string, member: Partial<Member>): Promise<Member | null>;
-  delete(id: string): Promise<boolean>;
+  getAll(guildId: string): Promise<Member[]>;
+  query(guildId: string, options?: MemberListQuery): Promise<PaginatedResult<Member>>;
+  getById(guildId: string, id: string): Promise<Member | null>;
+  getByWallet(guildId: string, wallet: string): Promise<Member | null>;
+  create(guildId: string, member: MemberCreateData): Promise<Member>;
+  update(guildId: string, id: string, member: MemberUpdateData): Promise<Member | null>;
+  delete(guildId: string, id: string): Promise<boolean>;
 }
 ```
 
@@ -186,21 +209,22 @@ const config = getStorageConfig(); // { mode, connectionString }
 ```typescript
 class MockMemberRepository implements IMemberRepository {
   private members: Map<string, Member> = new Map();
-  private walletIndex: Map<string, string> = new Map(); // wallet -> id
+  private walletIndex: Map<string, string> = new Map(); // (guildId, wallet) -> id
   private nextId = 5;
 
-  async create(member: Omit<Member, "id">): Promise<Member> {
+  async create(guildId: string, member: MemberCreateData): Promise<Member> {
     const id = String(this.nextId++);
-    const newMember: Member = { ...member, id };
+    // guildId comes from the scope parameter only — payloads cannot set it.
+    const newMember: Member = { ...member, id, guildId };
     this.members.set(id, newMember);
-    this.walletIndex.set(member.wallet, id); // Index for O(1) lookup
+    this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
     return newMember;
   }
 
-  async getByWallet(wallet: string): Promise<Member | null> {
-    const id = this.walletIndex.get(wallet);
+  async getByWallet(guildId: string, wallet: string): Promise<Member | null> {
+    const id = this.walletIndex.get(this.walletKey(guildId, wallet));
     if (!id) return null;
-    return this.members.get(id) || null;
+    return this.getScoped(guildId, id);
   }
 }
 ```
@@ -227,7 +251,7 @@ export class DurablePassRepository implements IPassRepository {
     this.connectionString = connectionString;
   }
 
-  async getAll(): Promise<Pass[]> {
+  async getAll(guildId: string): Promise<Pass[]> {
     throw new Error(
       "DurablePassRepository.getAll() not yet implemented. " +
       "Implement against your backend (PostgreSQL, MongoDB, etc.)."
@@ -246,10 +270,17 @@ To implement a durable backend:
 4. **Handle transactions** for atomic operations (create, update, delete)
 5. **Enforce uniqueness** where needed:
    - Activity event IDs must be unique (idempotency)
-   - Wallet addresses should be unique in Member storage
+   - Wallet addresses should be unique per guild in Member storage
+     (composite constraint on `(guild_id, wallet)`)
 6. **Add soft deletes** if needed (keep audit trails)
+6. **Enforce guild isolation** (see [docs/multi-tenancy.md](../../../../docs/multi-tenancy.md)):
+   - `passes`/`members` tables carry a NOT NULL `guild_id` foreign key
+   - every statement filters on `guild_id`; `guild_id` never appears in an
+     UPDATE SET clause
+   - run the isolation contract suites from
+     `test/repositories/contracts.ts` against your adapter
 7. **Index strategic columns**:
-   - `Member.wallet` (for lookups)
+   - `Member.(guild_id, wallet)` (for scoped lookups)
    - `ActivityEvent.id` (for deduplication)
    - `ActivityEvent.type` (for filtering)
 
@@ -257,17 +288,20 @@ To implement a durable backend:
 
 ```typescript
 export class DurablePassRepository implements IPassRepository {
-  async getAll(): Promise<Pass[]> {
+  async getAll(guildId: string): Promise<Pass[]> {
     const client = new PgClient(this.connectionString);
-    const result = await client.query("SELECT * FROM passes");
+    const result = await client.query(
+      "SELECT * FROM passes WHERE guild_id = $1",
+      [guildId]
+    );
     return result.rows;
   }
 
-  async create(pass: Omit<Pass, "id" | "createdAt">): Promise<Pass> {
+  async create(guildId: string, pass: PassCreateData): Promise<Pass> {
     const client = new PgClient(this.connectionString);
     const result = await client.query(
-      "INSERT INTO passes (name, price, description) VALUES ($1, $2, $3) RETURNING *",
-      [pass.name, pass.price, pass.description]
+      "INSERT INTO passes (guild_id, name, price, description) VALUES ($1, $2, $3, $4) RETURNING *",
+      [guildId, pass.name, pass.price, pass.description]
     );
     return result.rows[0];
   }
@@ -278,21 +312,22 @@ export class DurablePassRepository implements IPassRepository {
 
 ```typescript
 export class DurablePassRepository implements IPassRepository {
-  async getAll(): Promise<Pass[]> {
+  async getAll(guildId: string): Promise<Pass[]> {
     const client = new MongoClient(this.connectionString);
     const db = client.db("guildpass");
     const collection = db.collection("passes");
-    return await collection.find({}).toArray();
+    return await collection.find({ guildId }).toArray();
   }
 
-  async create(pass: Omit<Pass, "id" | "createdAt">): Promise<Pass> {
+  async create(guildId: string, pass: PassCreateData): Promise<Pass> {
     const collection = db.collection("passes");
     const result = await collection.insertOne({
       ...pass,
+      guildId,
       _id: new ObjectId(),
       createdAt: new Date().toISOString(),
     });
-    return { id: result.insertedId.toString(), ...pass };
+    return { id: result.insertedId.toString(), guildId, ...pass };
   }
 }
 ```
@@ -341,13 +376,13 @@ import { MockPassRepository } from "@/lib/repositories/adapters/mock";
 test("MockPassRepository should create and retrieve passes", async () => {
   const repo = new MockPassRepository();
 
-  const pass = await repo.create({
+  const pass = await repo.create("1", {
     name: "Test",
     price: 1.0,
     description: "Test",
   });
 
-  const retrieved = await repo.getById(pass.id);
+  const retrieved = await repo.getById("1", pass.id);
   expect(retrieved.name).toBe("Test");
 });
 ```
@@ -373,7 +408,7 @@ test("Repository in durable mode should error gracefully", async () => {
   process.env.DATABASE_URL = "postgresql://localhost/test";
 
   const repo = getRepositoryFactory().passRepository();
-  expect(() => repo.getAll()).toThrow("not yet implemented");
+  expect(() => repo.getAll("1")).toThrow("not yet implemented");
 
   // Reset
   process.env.DASHBOARD_STORAGE_MODE = "mock";
@@ -416,7 +451,7 @@ apps/dashboard/test/
 ```typescript
 import { getStorageMode } from "@/lib/env";
 
-async function savePass(pass: Pass) {
+async function savePass(guildId: string, pass: PassCreateData) {
   const mode = getStorageMode();
 
   if (mode === "mock") {
@@ -426,17 +461,17 @@ async function savePass(pass: Pass) {
   }
 
   const repo = getPassRepository();
-  return await repo.create(pass);
+  return await repo.create(guildId, pass);
 }
 ```
 
 ### Fallback to Mock on Error
 
 ```typescript
-async function getSafePasses(): Promise<Pass[]> {
+async function getSafePasses(guildId: string): Promise<Pass[]> {
   try {
     const repo = getPassRepository();
-    return await repo.getAll();
+    return await repo.getAll(guildId);
   } catch (error) {
     console.error("Repository error, falling back to mock:", error);
     return mockPasses; // From lib/mock-data.ts
@@ -450,14 +485,14 @@ async function getSafePasses(): Promise<Pass[]> {
 test("Pass workflow", async () => {
   clearRepositories();
 
-  // First call to any repository loads mock data
+  // First call to any repository loads mock data (guild "1" holds the seeds)
   const repo = getPassRepository();
-  const initial = await repo.getAll();
+  const initial = await repo.getAll("1");
   expect(initial.length).toBeGreaterThan(0); // Seeded!
 
   // Now test custom operations
-  const custom = await repo.create({ name: "Custom", price: 5.0, description: "" });
-  const all = await repo.getAll();
+  const custom = await repo.create("1", { name: "Custom", price: 5.0, description: "" });
+  const all = await repo.getAll("1");
   expect(all.some((p) => p.id === custom.id)).toBe(true);
 });
 ```
@@ -484,9 +519,11 @@ When ready to move to production:
    const mockRepo = new MockPassRepository();
    const durableRepo = new DurablePassRepository(connectionString);
 
-   const passes = await mockRepo.getAll();
-   for (const pass of passes) {
-     await durableRepo.create(pass);
+   for (const guild of await getGuildRepository().getAll()) {
+     const passes = await mockRepo.getAll(guild.id);
+     for (const pass of passes) {
+       await durableRepo.create(guild.id, pass);
+     }
    }
    ```
 
@@ -516,10 +553,13 @@ To persist data, use durable mode with a backend database.
 
 ```typescript
 // ❌ Won't find if stored as lowercase
-const member = await memberRepo.getByWallet("0xABC123");
+const member = await memberRepo.getByWallet(guildId, "0xABC123");
 
 // ✅ Normalize format consistently
-const member = await memberRepo.getByWallet("0xabc123".toLowerCase());
+const member = await memberRepo.getByWallet(guildId, "0xabc123".toLowerCase());
+
+// Also check the guild scope: a wallet that belongs to a different guild
+// resolves to null by design (see docs/multi-tenancy.md).
 ```
 
 ### Q: Why is `clearRepositories()` needed in tests?
@@ -528,19 +568,19 @@ const member = await memberRepo.getByWallet("0xabc123".toLowerCase());
 
 ```typescript
 test("Test 1", async () => {
-  await getPassRepository().create({ name: "Pass1" });
+  await getPassRepository().create("1", { name: "Pass1" });
   // Pass1 now in global repository instance
 });
 
 test("Test 2", async () => {
-  const passes = await getPassRepository().getAll();
+  const passes = await getPassRepository().getAll("1");
   // ❌ Will see Pass1 from Test 1!
 });
 
 // ✅ Fix:
 test("Test 2", async () => {
   clearRepositories(); // Resets singleton instances
-  const passes = await getPassRepository().getAll();
+  const passes = await getPassRepository().getAll("1");
   // Clean slate
 });
 ```

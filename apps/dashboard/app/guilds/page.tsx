@@ -2,6 +2,7 @@
 
 import { getClientApiMode } from '@/lib/client-env';
 import DashboardLayout from "@/components/DashboardLayout";
+import EmptyState from "@/components/EmptyState";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
 import { mockGuilds, type Guild as MockGuild } from "@/lib/mock-data";
 import { useEffect, useState, useRef } from "react";
@@ -121,12 +122,9 @@ export default function GuildsPage() {
 
   return (
     <DashboardLayout title="Guilds" session={session}>
-      {/* â”€â”€ Unsupported banner (live mode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {listState === "unsupported" && (
         <UnsupportedBanner resource="guilds" />
       )}
-
-      {/* â”€â”€ Error banner (live mode network error) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {listState === "error" && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 my-4">
           <p className="text-sm text-red-700">
@@ -136,50 +134,61 @@ export default function GuildsPage() {
       )}
 
       {listState !== "unsupported" && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {guilds.map((guild) => {
-          const isPending = pendingIds.has(guild.id);
-          return (
-            <div key={guild.id} className={`bg-white border border-slate-200 rounded-xl p-6 transition-all ${isPending ? "opacity-50 scale-[0.98] pointer-events-none" : "hover:shadow-md"}`}>
-              <div className="flex justify-between items-start mb-2">
-                <h3 className="text-lg font-semibold text-slate-800">{guild.name}</h3>
-                {isPending && <span className="text-xs text-slate-400 animate-pulse">updating...</span>}
-              </div>
-              <p className="text-slate-600 mb-4">{guild.description}</p>
-              <div className="flex gap-4 text-sm mb-6">
-                <div>
-                  <span className="text-slate-500">Members:</span>
-                  <span className="font-semibold text-slate-800 ml-2">{guild.memberCount}</span>
+        guilds.length === 0 ? (
+          <EmptyState
+            title="No guilds yet"
+            description={
+              canWrite
+                ? "Create your first guild to get started."
+                : "Guilds will appear here once they're created."
+            }
+            icon="-"
+          />
+        ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {guilds.map((guild) => {
+            const isPending = pendingIds.has(guild.id);
+            return (
+              <div key={guild.id} className={`bg-white border border-slate-200 rounded-xl p-6 transition-all ${isPending ? "opacity-50 scale-[0.98] pointer-events-none" : "hover:shadow-md"}`}>
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-lg font-semibold text-slate-800">{guild.name}</h3>
+                  {isPending && <span className="text-xs text-slate-400 animate-pulse">updating...</span>}
                 </div>
-                <div>
-                  <span className="text-slate-500">Passes:</span>
-                  <span className="font-semibold text-slate-800 ml-2">{guild.passCount}</span>
+                <p className="text-slate-600 mb-4">{guild.description}</p>
+                <div className="flex gap-4 text-sm mb-6">
+                  <div>
+                    <span className="text-slate-500">Members:</span>
+                    <span className="font-semibold text-slate-800 ml-2">{guild.memberCount}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Passes:</span>
+                    <span className="font-semibold text-slate-800 ml-2">{guild.passCount}</span>
+                  </div>
                 </div>
-              </div>
 
-              {canWrite && (
-                <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
-                  <button
-                    onClick={() => handleRename(guild.id, guild.name)}
-                    className="text-xs font-medium text-slate-600 hover:text-violet-600 transition-colors"
-                  >
-                    Rename
-                  </button>
-                  <span className="text-slate-300">Â·</span>
-                  <button
-                    onClick={() => handleDelete(guild.id)}
-                    className="text-xs font-medium text-red-500 hover:text-red-700 transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                {canWrite && (
+                  <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
+                    <button
+                      onClick={() => handleRename(guild.id, guild.name)}
+                      className="text-xs font-medium text-slate-600 hover:text-violet-600 transition-colors"
+                    >
+                      Rename
+                    </button>
+                    <span className="text-slate-300">·</span>
+                    <button
+                      onClick={() => handleDelete(guild.id)}
+                      className="text-xs font-medium text-red-500 hover:text-red-700 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        )
       )}
     </DashboardLayout>
   );
 }
-

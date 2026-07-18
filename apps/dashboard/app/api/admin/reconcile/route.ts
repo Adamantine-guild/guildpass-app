@@ -30,18 +30,18 @@ import type { ApiFieldError } from "@/lib/api-contracts";
 // ── Counting strategies ───────────────────────────────────────────────────────
 //
 // Same defaults as the CLI script. In production, these should use direct SQL
-// queries for performance. For mock mode, they count all entries since members
-// and passes are not yet partitioned by guild in the mock data model.
+// queries for performance. The repository layer is guild-scoped, so each count
+// only ever sees the requested guild's records.
 
-async function countMembersForGuild(_guildId: string): Promise<number> {
+async function countMembersForGuild(guildId: string): Promise<number> {
   const memberRepo = getMemberRepository();
-  const all = await memberRepo.getAll();
+  const all = await memberRepo.getAll(guildId);
   return all.length;
 }
 
-async function countPassesForGuild(_guildId: string): Promise<number> {
+async function countPassesForGuild(guildId: string): Promise<number> {
   const passRepo = getPassRepository();
-  const all = await passRepo.getAll();
+  const all = await passRepo.getAll(guildId);
   return all.length;
 }
 

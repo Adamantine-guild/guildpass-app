@@ -9,12 +9,16 @@ import { validateWebhookPayload } from "@/lib/activity/validation";
 
 export async function POST(req: NextRequest) {
   try {
-    const { WEBHOOK_SECRET } = getEnv();
+    const { WEBHOOK_SECRET, WEBHOOK_SECRET_PREVIOUS } = getEnv();
 
     if (!WEBHOOK_SECRET) {
       console.error("WEBHOOK_SECRET is not configured");
       return apiError("Webhook secret not configured", 500);
     }
+
+    const secrets = [WEBHOOK_SECRET, WEBHOOK_SECRET_PREVIOUS].filter(
+      (secret): secret is string => Boolean(secret)
+    );
 
     const signatureHeader = req.headers.get("x-guildpass-signature");
     if (!signatureHeader) {
@@ -25,7 +29,7 @@ export async function POST(req: NextRequest) {
 
     const verification = verifySignature({
       signatureHeader,
-      secret: WEBHOOK_SECRET,
+      secret: secrets,
       payload: rawBody,
     });
 

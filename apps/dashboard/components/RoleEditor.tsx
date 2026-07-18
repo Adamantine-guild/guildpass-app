@@ -1,5 +1,4 @@
 "use client";
-
 /**
  * components/RoleEditor.tsx
  *
@@ -10,8 +9,12 @@
  *
  * Stateless: it calls `onChange` with the next roles array and lets the parent
  * own persistence + optimistic rollback.
+ *
+ * Accessibility: role additions and removals are announced through a
+ * visually-hidden aria-live="polite" region so screen reader users get audible
+ * confirmation. All interactive controls expose a visible focus-visible ring.
  */
-
+import { useRef, useState } from "react";
 import { MEMBER_ROLES, addRole, removeRole } from "@/lib/member-roles";
 
 interface RoleEditorProps {
@@ -23,6 +26,28 @@ interface RoleEditorProps {
 
 export default function RoleEditor({ roles, disabled, onChange }: RoleEditorProps) {
   const available = MEMBER_ROLES.filter((r) => !roles.includes(r));
+
+  // Live-region message announced to assistive tech on each role change.
+  const [announcement, setAnnouncement] = useState("");
+  // Track the last message so we can nudge identical consecutive announcements
+  // (some screen readers skip a live update whose text is unchanged).
+  const lastRef = useRef("");
+
+  const announce = (message: string) => {
+    const next = message === lastRef.current ? `${message}\u00A0` : message;
+    lastRef.current = next;
+    setAnnouncement(next);
+  };
+
+  const handleRemove = (role: string) => {
+    onChange(removeRole(roles, role));
+    announce(`Removed role ${role}`);
+  };
+
+  const handleAdd = (role: string) => {
+    onChange(addRole(roles, role));
+    announce(`Added role ${role}`);
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -41,8 +66,8 @@ export default function RoleEditor({ roles, disabled, onChange }: RoleEditorProp
               type="button"
               aria-label={`Remove role ${role}`}
               title={`Remove role ${role}`}
-              onClick={() => onChange(removeRole(roles, role))}
-              className="text-slate-400 hover:text-red-600 leading-none"
+              onClick={() => handleRemove(role)}
+              className="text-slate-400 hover:text-red-600 leading-none rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
             >
               ×
             </button>
@@ -57,9 +82,9 @@ export default function RoleEditor({ roles, disabled, onChange }: RoleEditorProp
           onChange={(e) => {
             const role = e.target.value;
             e.target.value = "";
-            if (role) onChange(addRole(roles, role));
+            if (role) handleAdd(role);
           }}
-          className="text-xs border border-slate-200 rounded px-1.5 py-1 text-slate-600 bg-white"
+          className="text-xs border border-slate-200 rounded px-1.5 py-1 text-slate-600 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
         >
           <option value="" disabled>
             + Add role
@@ -71,6 +96,15 @@ export default function RoleEditor({ roles, disabled, onChange }: RoleEditorProp
           ))}
         </select>
       )}
+
+      {/* Visually hidden polite live region for screen reader announcements. */}
+      <span
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </span>
     </div>
   );
 }

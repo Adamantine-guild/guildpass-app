@@ -6,6 +6,7 @@ import {
 } from "@/lib/api-helpers";
 import { NotFoundError } from "@/lib/api-errors";
 import { mockPasses, type Pass } from "@/lib/mock-data";
+import { getActiveGuildId } from "@/lib/guild-context";
 import { requireSessionAndPermission } from "@/lib/auth/require-permission";
 import { getApiMode } from "@/lib/env";
 import { getPassRepository } from "@/lib/repositories/factory";
@@ -37,7 +38,7 @@ export async function GET(
 
     try {
       const passRepository = getPassRepository();
-      return await passRepository.query(query);
+      return await passRepository.query(getActiveGuildId(), query);
     } catch (error) {
       console.error("Error fetching passes:", error);
       return getFallbackPasses(query);
@@ -63,7 +64,9 @@ function isPassStatus(value: string | null): value is Pass["status"] {
 }
 
 function getFallbackPasses(query: PassListQuery) {
-  const filtered = filterPasses(mockPasses, query);
+  const guildId = getActiveGuildId();
+  const scoped = mockPasses.filter((pass) => pass.guildId === guildId);
+  const filtered = filterPasses(scoped, query);
   return paginateItems(filtered, query);
 }
 
@@ -86,7 +89,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const created = await passRepository.create(validation.data);
+    const created = await passRepository.create(getActiveGuildId(), validation.data);
     await recordDashboardActivity({
       type: "pass.created",
       entity: { type: "pass", id: created.id, name: created.name },
@@ -124,7 +127,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const updated = await passRepository.update(id, validation.data);
+    const updated = await passRepository.update(getActiveGuildId(), id, validation.data);
     if (!updated) throw new NotFoundError("Pass not found.");
     await recordDashboardActivity({
       type: "pass.updated",
@@ -151,9 +154,10 @@ export async function DELETE(request: Request): Promise<NextResponse> {
 
   return handleApiError(async () => {
     const passRepository = getPassRepository();
-    const pass = await passRepository.getById(id);
+    const guildId = getActiveGuildId();
+    const pass = await passRepository.getById(guildId, id);
     if (!pass) throw new NotFoundError("Pass not found.");
-    const success = await passRepository.delete(id);
+    const success = await passRepository.delete(guildId, id);
     if (!success) throw new NotFoundError("Pass not found.");
     await recordDashboardActivity({
       type: "pass.deleted",

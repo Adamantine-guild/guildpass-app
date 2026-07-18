@@ -24,6 +24,13 @@ describe("MockSettingsRepository", () => {
     assert.equal((await repo.get()).workspaceName, "Acme DAO");
   });
 
+  test("update() persists a supported timezone", async () => {
+    const repo = new MockSettingsRepository();
+    const updated = await repo.update({ timezone: "Africa/Lagos" });
+    assert.equal(updated.timezone, "Africa/Lagos");
+    assert.equal((await repo.get()).timezone, "Africa/Lagos");
+  });
+
   test("get() returns a copy, not the internal reference", async () => {
     const repo = new MockSettingsRepository();
     const a = await repo.get();

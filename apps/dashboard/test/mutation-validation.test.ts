@@ -50,7 +50,7 @@ describe("pass mutation validation", () => {
       throw new Error("Expected validation to pass");
     }
 
-    const pass = await getPassRepository().create(validation.data);
+    const pass = await getPassRepository().create("1", validation.data);
     assert.equal(pass.name, "Season Pass");
     assert.equal(pass.status, "draft");
     assert.equal(pass.currentSupply, 0);
@@ -108,7 +108,7 @@ describe("member mutation validation", () => {
       throw new Error("Expected validation to pass");
     }
 
-    const member = await getMemberRepository().create(validation.data);
+    const member = await getMemberRepository().create("1", validation.data);
     assert.equal(member.name, "Ada");
     assert.equal(member.wallet, VALID_WALLET);
     assert.equal(member.status, "pending");

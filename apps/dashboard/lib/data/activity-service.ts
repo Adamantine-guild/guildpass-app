@@ -19,7 +19,7 @@ class ActivityService {
   /**
    * Create a new activity event and store it
    */
-  async createEvent(event: Omit<ActivityEvent, "id" | "timestamp"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
+  async createEvent(event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
     const fullEvent: ActivityEvent = {
       ...event,
       id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

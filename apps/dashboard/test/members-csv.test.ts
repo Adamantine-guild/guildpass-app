@@ -5,6 +5,7 @@ import type { Member } from "../lib/mock-data";
 
 const baseMember: Member = {
   id: "member-1",
+  guildId: "1",
   name: "Alice",
   wallet: "0xabc",
   status: "active",

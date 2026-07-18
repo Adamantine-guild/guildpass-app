@@ -231,3 +231,14 @@ apps/dashboard/
 ├── guilds/route.ts     ← POST/DELETE guarded by assertPermission(MOCK_API_SESSION, ...)
 
 └── settings/route.ts   ← PATCH guarded by assertPermission(MOCK_API_SESSION, ...)
+
+---
+
+## Related: Multi-Tenant Data Isolation
+
+RBAC governs **who** may act; guild scoping governs **which data** they may
+act on. The repository layer structurally enforces that every pass/member
+query is scoped to a single guild, so an admin of one guild can never read
+or modify another guild's data — even through a buggy route handler. See
+[multi-tenancy.md](multi-tenancy.md) for the full isolation guarantee and
+its contract tests.

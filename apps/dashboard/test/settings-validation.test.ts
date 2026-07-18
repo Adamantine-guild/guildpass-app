@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { validateSettingsPatch } from "../lib/validation/settings";
+import { SUPPORTED_TIMEZONES } from "../lib/timezones";
 
 describe("validateSettingsPatch", () => {
   test("accepts a valid partial patch and trims text", () => {
@@ -24,6 +25,19 @@ describe("validateSettingsPatch", () => {
       email: "ada@guildpass.xyz",
     });
     assert.equal(result.ok, true);
+  });
+
+  test("accepts timezones from the shared supported list", () => {
+    for (const timezone of [
+      "UTC",
+      "America/New_York",
+      "Europe/London",
+      "Africa/Lagos",
+      "Asia/Tokyo",
+    ]) {
+      assert.equal(SUPPORTED_TIMEZONES.includes(timezone), true);
+      assert.equal(validateSettingsPatch({ timezone }).ok, true);
+    }
   });
 
   test("rejects an unsupported timezone with a field error", () => {

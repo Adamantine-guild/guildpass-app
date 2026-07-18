@@ -41,11 +41,12 @@ const settingsPatchSchema = z
         message: `Display name must be ${MAX_TEXT_LENGTH} characters or fewer.`,
       })
       .optional(),
-    timezone: z.enum(ALLOWED_TIMEZONES, {
-      errorMap: () => ({
-        message: `Timezone must be one of: ${ALLOWED_TIMEZONES.join(", ")}.`,
-      }),
-    }).optional(),
+    timezone: z
+      .string({ invalid_type_error: "Timezone is required." })
+      .refine((timezone) => ALLOWED_TIMEZONES.includes(timezone), {
+        message: "Timezone must be a supported IANA timezone.",
+      })
+      .optional(),
     email: z
       .string({ invalid_type_error: "A valid email address is required." })
       .trim()

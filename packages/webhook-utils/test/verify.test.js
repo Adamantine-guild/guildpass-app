@@ -59,6 +59,24 @@ describe("verifySignature", () => {
       assert.strictEqual(result.timestamp, customTimestamp);
     });
 
+    test("should verify a signature using a previous secret when multiple secrets are configured", () => {
+      const previousSecret = "previous-secret";
+      const currentSecret = "current-secret";
+      const { signature } = generateSignature({
+        secret: previousSecret,
+        payload: PAYLOAD,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: [currentSecret, previousSecret],
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.ok(typeof result.timestamp === "number");
+    });
+
     test("should verify when tolerance is 0 (disabled)", () => {
       const oldTimestamp = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
       const { signature } = generateSignature({
@@ -109,6 +127,24 @@ describe("verifySignature", () => {
       const result = verifySignature({
         signatureHeader: signature,
         secret: "wrong-secret",
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.error, "Invalid signature");
+    });
+
+    test("should reject when the signature does not match any configured secret", () => {
+      const previousSecret = "previous-secret";
+      const currentSecret = "current-secret";
+      const { signature } = generateSignature({
+        secret: "other-secret",
+        payload: PAYLOAD,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: [currentSecret, previousSecret],
         payload: PAYLOAD,
       });
 

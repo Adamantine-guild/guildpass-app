@@ -3,8 +3,8 @@ import { createHmac, timingSafeEqual } from "crypto";
 export type VerifyOptions = {
   /** The signature header from the incoming webhook (e.g., "t=1234567890,v1=abc123...") */
   signatureHeader: string;
-  /** Your webhook secret used to sign the payload */
-  secret: string;
+  /** Your webhook secret used to sign the payload, or a list of valid secrets for rotation */
+  secret: string | string[];
   /** The raw webhook payload (must be the exact body bytes received) */
   payload: string | Buffer;
   /**
@@ -57,7 +57,12 @@ export function verifySignature(opts: VerifyOptions): VerifyResult {
     return { valid: false, error: "Missing or invalid signature header" };
   }
 
-  if (!secret || typeof secret !== "string") {
+  const secrets = Array.isArray(secret) ? secret : [secret];
+
+  if (
+    secrets.length === 0 ||
+    secrets.some((candidate) => typeof candidate !== "string" || candidate.length === 0)
+  ) {
     return { valid: false, error: "Missing or invalid secret" };
   }
 
@@ -115,26 +120,29 @@ export function verifySignature(opts: VerifyOptions): VerifyResult {
     : payload;
 
   const signedPayload = `${timestamp}.${payloadString}`;
-  const expectedSignature = createHmac("sha256", secret)
-    .update(signedPayload)
-    .digest("hex");
 
   // Constant-time comparison to prevent timing attacks
   try {
     const signatureBuffer = Buffer.from(signature, "hex");
-    const expectedBuffer = Buffer.from(expectedSignature, "hex");
 
-    if (signatureBuffer.length !== expectedBuffer.length) {
-      return { valid: false, error: "Invalid signature", timestamp };
+    for (const candidateSecret of secrets) {
+      const expectedSignature = createHmac("sha256", candidateSecret)
+        .update(signedPayload)
+        .digest("hex");
+      const expectedBuffer = Buffer.from(expectedSignature, "hex");
+
+      if (signatureBuffer.length !== expectedBuffer.length) {
+        continue;
+      }
+
+      const isValid = timingSafeEqual(signatureBuffer, expectedBuffer);
+
+      if (isValid) {
+        return { valid: true, timestamp };
+      }
     }
 
-    const isValid = timingSafeEqual(signatureBuffer, expectedBuffer);
-
-    if (!isValid) {
-      return { valid: false, error: "Invalid signature", timestamp };
-    }
-
-    return { valid: true, timestamp };
+    return { valid: false, error: "Invalid signature", timestamp };
   } catch (err) {
     return {
       valid: false,

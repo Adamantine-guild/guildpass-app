@@ -13,6 +13,9 @@ import type { ActivityEvent } from "../lib/activity/types";
 process.env.DASHBOARD_STORAGE_MODE = "mock";
 process.env.DASHBOARD_API_MODE = "mock";
 
+// Guild scope for pass/member repository calls (seeded mock guild).
+const GUILD = "1";
+
 describe("recordDashboardActivity", () => {
   beforeEach(() => clearRepositories());
 
@@ -197,7 +200,7 @@ describe("recordDashboardActivity", () => {
     const before = await getActivityRepository().query({});
 
     const repo = getPassRepository();
-    const result = await repo.update("nonexistent", { name: "test" });
+    const result = await repo.update(GUILD, "nonexistent", { name: "test" });
     assert.equal(result, null, "update of non-existent pass returns null");
 
     const after = await getActivityRepository().query({});
@@ -206,7 +209,7 @@ describe("recordDashboardActivity", () => {
 
   test("route handler pass creation flow records activity", async () => {
     const repo = getPassRepository();
-    const created = await repo.create({
+    const created = await repo.create(GUILD, {
       name: "Integration Pass",
       description: "Test",
       status: "active",
@@ -227,14 +230,14 @@ describe("recordDashboardActivity", () => {
 
   test("route handler pass update flow records activity", async () => {
     const repo = getPassRepository();
-    const created = await repo.create({
+    const created = await repo.create(GUILD, {
       name: "Update Pass",
       description: "Test",
       status: "draft",
       currentSupply: 0,
     });
 
-    const updated = await repo.update(created.id, { status: "active" });
+    const updated = await repo.update(GUILD, created.id, { status: "active" });
     assert.ok(updated);
 
     await recordDashboardActivity({
@@ -250,14 +253,14 @@ describe("recordDashboardActivity", () => {
 
   test("route handler pass deactivation flow records activity", async () => {
     const repo = getPassRepository();
-    const created = await repo.create({
+    const created = await repo.create(GUILD, {
       name: "Deactivate Pass",
       description: "Test",
       status: "active",
       currentSupply: 0,
     });
 
-    const deleted = await repo.delete(created.id);
+    const deleted = await repo.delete(GUILD, created.id);
     assert.equal(deleted, true);
 
     await recordDashboardActivity({
@@ -273,7 +276,7 @@ describe("recordDashboardActivity", () => {
 
   test("route handler member role change flow records activity", async () => {
     const repo = getMemberRepository();
-    const created = await repo.create({
+    const created = await repo.create(GUILD, {
       wallet: "0xrole_test",
       name: "Role Test",
       status: "active",
@@ -282,7 +285,7 @@ describe("recordDashboardActivity", () => {
       lastActive: new Date().toISOString(),
     });
 
-    const updated = await repo.update(created.id, { roles: ["member", "contributor"] });
+    const updated = await repo.update(GUILD, created.id, { roles: ["member", "contributor"] });
     assert.ok(updated);
 
     await recordDashboardActivity({
@@ -298,7 +301,7 @@ describe("recordDashboardActivity", () => {
 
   test("route handler member removal flow records activity", async () => {
     const repo = getMemberRepository();
-    const created = await repo.create({
+    const created = await repo.create(GUILD, {
       wallet: "0xremoval_test",
       name: "Remove Test",
       status: "active",
@@ -307,7 +310,7 @@ describe("recordDashboardActivity", () => {
       lastActive: new Date().toISOString(),
     });
 
-    const deleted = await repo.delete(created.id);
+    const deleted = await repo.delete(GUILD, created.id);
     assert.equal(deleted, true);
 
     await recordDashboardActivity({
