@@ -7,6 +7,8 @@
  * server-side if added later (see issue #80 notes).
  */
 
+<<<<<<< HEAD
+=======
 import { SUPPORTED_TIMEZONES } from "@/lib/timezones";
 
 export const SECRET_MASK = "••••••••";
@@ -17,6 +19,7 @@ export interface WriteOnlySecret {
   readonly __secretBrand?: never;
 }
 
+>>>>>>> main
 export interface DashboardSettings {
   /** Display name of the workspace. */
   workspaceName: string;
@@ -32,7 +35,11 @@ export interface DashboardSettings {
  * Timezones the UI offers and the API accepts. Kept in lockstep with the
  * <select> options on the settings page so the two cannot drift.
  */
-export const ALLOWED_TIMEZONES = SUPPORTED_TIMEZONES;
+export const ALLOWED_TIMEZONES = [
+  "UTC",
+  "America/New_York",
+  "Europe/London",
+] as const;
 
 export type AllowedTimezone = (typeof ALLOWED_TIMEZONES)[number];
 

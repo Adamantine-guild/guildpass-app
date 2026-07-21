@@ -282,14 +282,6 @@ export class IndexerCore {
   private async applyEventApplication(decoded: any, tx: any) {
     const { eventName, args } = decoded;
 
-    const membership = await tx.membership.findUnique({
-      where: { wallet_passId: { wallet: args.member, passId: args.passId } },
-      select: { status: true },
-    });
-    const previousState = {
-      membership: membership ? { status: membership.status } : null,
-    };
-
     if (eventName === MEMBERSHIP_EVENTS.MembershipCreated) {
       await tx.membership.upsert({
         where: { wallet_passId: { wallet: args.member, passId: args.passId } },
@@ -302,35 +294,24 @@ export class IndexerCore {
         data: { status: args.newStatus },
       });
     }
-
-    return previousState;
   }
 
   private async revertEventApplication(event: any, tx: any) {
     const data = event.data as any;
-    const previousState = event.previousState as {
-      membership: { status: number } | null;
-    } | null;
 
-    if (!previousState || !("membership" in previousState)) {
-      throw new Error(`Processed event ${event.id} is missing rollback state`);
-    }
-
-    const membershipKey = {
-      wallet_passId: { wallet: data.member, passId: BigInt(data.passId) },
-    };
-
-    if (previousState.membership === null) {
-      // The applied event created this row, so rollback removes it.
-      await tx.membership.deleteMany({
-        where: membershipKey.wallet_passId,
-      });
-    } else {
-      // Restore the exact status captured immediately before the event was applied.
-      await tx.membership.update({
-        where: membershipKey,
-        data: { status: previousState.membership.status },
-      });
+    if (event.eventType === MEMBERSHIP_EVENTS.MembershipCreated) {
+      await tx.membership
+        .delete({
+          where: { wallet_passId: { wallet: data.member, passId: BigInt(data.passId) } },
+        })
+        .catch(() => {});
+    } else if (event.eventType === MEMBERSHIP_EVENTS.MembershipUpdated) {
+      await tx.membership
+        .update({
+          where: { wallet_passId: { wallet: data.member, passId: BigInt(data.passId) } },
+          data: { status: 0 },
+        })
+        .catch(() => {});
     }
   }
 
@@ -345,7 +326,7 @@ export class IndexerCore {
         blockNumber: { gte: reorgBlockNumber },
         status: "processed",
       },
-      orderBy: [{ blockNumber: "desc" }, { logIndex: "desc" }],
+      orderBy: { blockNumber: "desc" },
     });
 
     await this.db.$transaction(async (tx: any) => {

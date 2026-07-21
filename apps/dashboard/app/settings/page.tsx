@@ -24,9 +24,13 @@ import { canEditSettings } from "@/lib/permissions";
 import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
 import { readApiResult } from "@/lib/api-client";
 import type { DashboardSettings } from "@/lib/settings";
+<<<<<<< HEAD
+import { useState, useRef, useEffect } from "react";
+=======
 import { SUPPORTED_TIMEZONES } from "@/lib/timezones";
 import { validateEmailField } from "@/lib/validation/settings";
 import { useState, useRef, useEffect, useCallback } from "react";
+>>>>>>> main
 
 export default function SettingsPage() {
   const session = useSession();
@@ -189,11 +193,9 @@ export default function SettingsPage() {
                       : "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
                     } ${saveMutation.isPending ? "opacity-50" : ""}`}
                 >
-                  {SUPPORTED_TIMEZONES.map((supportedTimezone) => (
-                    <option key={supportedTimezone} value={supportedTimezone}>
-                      {supportedTimezone}
-                    </option>
-                  ))}
+                  <option>UTC</option>
+                  <option>America/New_York</option>
+                  <option>Europe/London</option>
                 </select>
               </div>
             </div>

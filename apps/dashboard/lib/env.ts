@@ -1,3 +1,17 @@
+<<<<<<< HEAD
+﻿export const env = {
+  GUILD_PASS_CORE_URL: process.env.GUILD_PASS_CORE_URL,
+  GUILD_PASS_CORE_API_KEY: process.env.GUILD_PASS_CORE_API_KEY,
+  WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
+  ACTIVITY_STORAGE_MODE: process.env.ACTIVITY_STORAGE_MODE,
+  ACTIVITY_STORAGE_DIR: process.env.ACTIVITY_STORAGE_DIR,
+  // API mode for dashboard: 'mock' (default) or 'live'
+  DASHBOARD_API_MODE: process.env.DASHBOARD_API_MODE || "mock",
+  // Storage mode for data persistence: 'mock' (default, in-memory) or 'durable' (backend)
+  DASHBOARD_STORAGE_MODE: process.env.DASHBOARD_STORAGE_MODE || "mock",
+  // Storage connection string (required when DASHBOARD_STORAGE_MODE is 'durable')
+  DATABASE_URL: process.env.DATABASE_URL,
+=======
 ﻿import { PublicApiError } from "./api-errors";
 
 export const env = {
@@ -10,6 +24,7 @@ ACTIVITY_STORAGE_DIR: process.env.ACTIVITY_STORAGE_DIR,
 DASHBOARD_API_MODE: process.env.DASHBOARD_API_MODE || "mock",
 DASHBOARD_STORAGE_MODE: process.env.DASHBOARD_STORAGE_MODE || "mock",
 DATABASE_URL: process.env.DATABASE_URL,
+>>>>>>> main
 };
 
 export interface ActivityRefreshConfig {
@@ -80,8 +95,6 @@ export function getEnv() {
   const GUILD_PASS_CORE_API_KEY =
     process.env.GUILD_PASS_CORE_API_KEY || env.GUILD_PASS_CORE_API_KEY;
   const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || env.WEBHOOK_SECRET;
-  const WEBHOOK_SECRET_PREVIOUS =
-    process.env.WEBHOOK_SECRET_PREVIOUS || env.WEBHOOK_SECRET_PREVIOUS;
   const ACTIVITY_STORAGE_MODE =
     process.env.ACTIVITY_STORAGE_MODE || env.ACTIVITY_STORAGE_MODE;
   const ACTIVITY_STORAGE_DIR =
@@ -93,7 +106,6 @@ export function getEnv() {
     GUILD_PASS_CORE_URL,
     GUILD_PASS_CORE_API_KEY,
     WEBHOOK_SECRET,
-    WEBHOOK_SECRET_PREVIOUS,
     ACTIVITY_STORAGE_MODE,
     ACTIVITY_STORAGE_DIR,
     apiMode,

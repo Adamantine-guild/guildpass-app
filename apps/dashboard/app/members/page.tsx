@@ -195,8 +195,6 @@ export default function MembersPage() {
     return `Showing ${start}-${end} of ${pagination.total} members`;
   }, [members.length, pagination]);
 
-  const hasActiveFilters = debouncedSearch.trim() !== "" || status !== "all" || role !== "all";
-
   const handleRemove = (id: string) => {
     if (confirm("Are you sure you want to remove this member?")) {
       deleteMutation.mutate(id);
@@ -423,17 +421,7 @@ export default function MembersPage() {
 
           {members.length === 0 && (
             <div className="mt-4">
-              <EmptyState
-                title={hasActiveFilters ? "No members match your filters" : "No members yet"}
-                description={
-                  hasActiveFilters
-                    ? "Adjust the search, status, or role filter to see more members."
-                    : canWrite
-                      ? "Invite your first member to get started."
-                      : "Members will appear here once invited."
-                }
-                icon="-"
-              />
+              <EmptyState title="No members match your filters" description="Adjust the search, status, or role filter to see more members." icon="-" />
             </div>
           )}
 

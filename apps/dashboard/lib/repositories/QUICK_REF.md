@@ -1,42 +1,34 @@
 # Repository Pattern - Quick Reference
 
-> **Multi-tenant isolation:** every pass/member repository method takes an
-> explicit `guildId` as its first argument — omitting it is a compile error.
-> Route handlers resolve the scope via `getActiveGuildId()` from
-> `@/lib/guild-context`. See [docs/multi-tenancy.md](../../../../docs/multi-tenancy.md).
-
 ## Using Repositories in API Routes
 
 ```typescript
 // Import
 import { apiResponse } from "@/lib/api-helpers";
-import { getActiveGuildId } from "@/lib/guild-context";
 import { getPassRepository } from "@/lib/repositories/factory";
 
-// Fetch all (scoped to the active guild)
+// Fetch all
 export async function GET() {
   const repo = getPassRepository();
-  const passes = await repo.getAll(getActiveGuildId());
+  const passes = await repo.getAll();
   return apiResponse(passes);
 }
 
-const guildId = getActiveGuildId();
+// Fetch by ID
+const pass = await repo.getById("1");
 
-// Fetch by ID (null if the pass belongs to a different guild)
-const pass = await repo.getById(guildId, "1");
-
-// Create (the new pass is owned by `guildId`; payloads cannot set guildId)
-const newPass = await repo.create(guildId, {
+// Create
+const newPass = await repo.create({
   name: "VIP Pass",
   price: 10.0,
   description: "Exclusive"
 });
 
-// Update (null if the pass belongs to a different guild)
-const updated = await repo.update(guildId, "1", { price: 12.0 });
+// Update
+const updated = await repo.update("1", { price: 12.0 });
 
-// Delete (false if the pass belongs to a different guild)
-await repo.delete(guildId, "1");
+// Delete
+await repo.delete("1");
 ```
 
 ## Using Member Repository with Wallet Lookup
@@ -46,8 +38,8 @@ import { getMemberRepository } from "@/lib/repositories/factory";
 
 const repo = getMemberRepository();
 
-// Find by wallet (O(1), scoped: only finds members of this guild)
-const member = await repo.getByWallet(guildId, "0x123abc");
+// Find by wallet (O(1))
+const member = await repo.getByWallet("0x123abc");
 ```
 
 ## Using Activity Repository (Append-Only)
@@ -106,7 +98,7 @@ test("my test", async () => {
   clearRepositories(); // Fresh state
   
   const repo = getPassRepository();
-  const pass = await repo.create("1", { name: "Test" });
+  const pass = await repo.create({ name: "Test" });
   
   // Assertions...
 });
@@ -126,7 +118,7 @@ console.log(repo1 === repo2); // true - same instance
 
 ```typescript
 try {
-  const passes = await getPassRepository().getAll(getActiveGuildId());
+  const passes = await getPassRepository().getAll();
 } catch (error) {
   console.error("Repository error:", error);
   // Fallback to mock data as needed
@@ -140,7 +132,7 @@ try {
 ```typescript
 try {
   const repo = getPassRepository();
-  return await repo.getAll(getActiveGuildId());
+  return await repo.getAll();
 } catch (error) {
   console.error("Repo error, using fallback:", error);
   return mockPasses; // From lib/mock-data.ts
@@ -162,7 +154,7 @@ if (getStorageMode() === "mock") {
 ```typescript
 // Passes
 import { getPassRepository } from "@/lib/repositories";
-const pass = await getPassRepository().getById(guildId, "1");
+const pass = await getPassRepository().getById("1");
 
 // Guilds
 import { getGuildRepository } from "@/lib/repositories";
@@ -170,7 +162,7 @@ const guild = await getGuildRepository().getAll();
 
 // Members
 import { getMemberRepository } from "@/lib/repositories";
-const member = await getMemberRepository().getByWallet(guildId, "0x...");
+const member = await getMemberRepository().getByWallet("0x...");
 
 // Activity
 import { getActivityRepository } from "@/lib/repositories";

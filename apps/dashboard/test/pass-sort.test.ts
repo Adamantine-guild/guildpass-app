@@ -7,7 +7,6 @@ import { sortPasses, type PassSortState } from "../lib/pass-sort";
 const passes: Pass[] = [
   {
     id: "free",
-    guildId: "1",
     name: "Free",
     description: "No price or supply cap",
     status: "draft",
@@ -17,7 +16,6 @@ const passes: Pass[] = [
   },
   {
     id: "nearly-full",
-    guildId: "1",
     name: "Nearly full",
     description: "Almost sold out",
     status: "active",
@@ -28,7 +26,6 @@ const passes: Pass[] = [
   },
   {
     id: "half-full",
-    guildId: "1",
     name: "Half full",
     description: "Half sold",
     status: "inactive",

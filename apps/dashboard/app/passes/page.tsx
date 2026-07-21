@@ -173,8 +173,6 @@ export default function PassesPage() {
     [passes, sort]
   );
 
-  const hasActiveFilters = debouncedSearch.trim() !== "" || status !== "all";
-
   const handleSort = (column: PassSortColumn) => {
     setSort((current) => ({
       column,
@@ -361,17 +359,7 @@ export default function PassesPage() {
 
           {passes.length === 0 && (
             <div className="mt-4">
-              <EmptyState
-                title={hasActiveFilters ? "No passes match your filters" : "No passes yet"}
-                description={
-                  hasActiveFilters
-                    ? "Adjust the search or status filter to see more passes."
-                    : canWrite
-                      ? "Create your first pass to get started."
-                      : "Passes will appear here once created."
-                }
-                icon="-"
-              />
+              <EmptyState title="No passes match your filters" description="Adjust the search or status filter to see more passes." icon="-" />
             </div>
           )}
 
