@@ -20,6 +20,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useGuild } from "@/lib/guild/GuildProvider";
 import { guildFetch } from "@/lib/guild/api";
 import { getMembersForGuild } from "@/lib/data/guild-scoped";
+import {
+  dashboardQueryCache,
+  invalidateAfterMutation,
+  queryKeys,
+} from "@/lib/cache/query-cache";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
 
 
 type ListState = "loading" | "loaded" | "unsupported" | "error";
@@ -60,6 +66,17 @@ export default function MembersPage() {
   const [page, setPage] = useState(1);
   const debouncedSearch = useDebouncedValue(search, 250);
   const previousMembersRef = useRef<MockMember[]>(members);
+  const membersQueryKey = useMemo(
+    () => queryKeys.members(guildId, {
+      page,
+      limit: PAGE_SIZE,
+      search: debouncedSearch.trim() || undefined,
+      status: status === "all" ? undefined : status,
+      role: role === "all" ? undefined : role,
+    }),
+    [debouncedSearch, guildId, page, role, status]
+  );
+  const cacheRevision = useQueryInvalidation(membersQueryKey);
 
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -96,8 +113,10 @@ export default function MembersPage() {
         if (status !== "all") params.set("status", status);
         if (role !== "all") params.set("role", role);
 
-        const res = await guildFetch(`/api/members?${params.toString()}`, guildId);
-        const data = await readApiResult<PaginatedResult<MockMember>>(res);
+        const data = await dashboardQueryCache.fetchQuery(membersQueryKey, async () => {
+          const res = await guildFetch(`/api/members?${params.toString()}`, guildId);
+          return readApiResult<PaginatedResult<MockMember>>(res);
+        });
         if (!mounted) return;
 
         setMembers(data.items);
@@ -120,7 +139,7 @@ export default function MembersPage() {
     return () => {
       mounted = false;
     };
-  }, [apiMode, debouncedSearch, page, role, status, guildId]);
+  }, [apiMode, cacheRevision, debouncedSearch, guildId, membersQueryKey, page, role, status]);
 
   const updateMutation = useOptimisticMutation<MockMember, { id: string; data: Partial<MockMember> & { version?: number } }>({
     mutationFn: async ({ id, data }) => {
@@ -146,6 +165,7 @@ export default function MembersPage() {
     },
     onSuccess: (updatedMember, { id }) => {
       setMembers((prev) => prev.map((m) => (m.id === id ? updatedMember : m)));
+      invalidateAfterMutation("member", guildId);
       setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -177,6 +197,7 @@ export default function MembersPage() {
     },
     onSuccess: (_data, id) => {
       setPagination((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      invalidateAfterMutation("member", guildId);
       setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -358,10 +379,11 @@ export default function MembersPage() {
                     };
                     setMembers((prev) => [safeMember, ...prev].slice(0, pagination.limit));
                     setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+                    invalidateAfterMutation("member", guildId);
                     setIsInviteOpen(false);
                     setForm({ name: "", wallet: "" });
-                  } catch (error: any) {
-                    alert(error.message);
+                  } catch (error: unknown) {
+                    alert(error instanceof Error ? error.message : "Failed to invite member.");
                   } finally {
                     setInviteLoading(false);
                   }

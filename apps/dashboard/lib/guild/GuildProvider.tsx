@@ -28,6 +28,8 @@ import {
   type Guild,
 } from "@/lib/mock-data";
 import { GUILD_ID_COOKIE, isGuildIdFormat } from "@/lib/guild-context";
+import { dashboardQueryCache, queryKeys } from "@/lib/cache/query-cache";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
 
 const STORAGE_KEY = "guildpass_selected_guild";
 
@@ -99,6 +101,7 @@ export function GuildProvider({
   });
   const [hydrated, setHydrated] = useState(false);
   const [loading, setLoading] = useState(true);
+  const guildsRevision = useQueryInvalidation(queryKeys.guilds());
 
   // Hydrate from storage once on the client when the route did not pin a guild.
   useEffect(() => {
@@ -128,14 +131,16 @@ export function GuildProvider({
     let mounted = true;
     async function load() {
       try {
-        const res = await fetch("/api/guilds");
-        if (!res.ok) return;
-        const payload = (await res.json()) as { ok?: boolean; data?: Guild[] } | Guild[];
-        const list = Array.isArray(payload)
-          ? payload
-          : payload && typeof payload === "object" && payload.ok && Array.isArray(payload.data)
-            ? payload.data
-            : null;
+        const list = await dashboardQueryCache.fetchQuery(queryKeys.guilds(), async () => {
+          const res = await fetch("/api/guilds");
+          if (!res.ok) throw new Error(`Guild request failed with ${res.status}`);
+          const payload = (await res.json()) as { ok?: boolean; data?: Guild[] } | Guild[];
+          return Array.isArray(payload)
+            ? payload
+            : payload && typeof payload === "object" && payload.ok && Array.isArray(payload.data)
+              ? payload.data
+              : [];
+        });
         if (mounted && list && list.length > 0) {
           setGuilds(list);
         }
@@ -149,7 +154,7 @@ export function GuildProvider({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [guildsRevision]);
 
   const setGuildId = useCallback((id: string) => {
     if (!isGuildIdFormat(id)) return;

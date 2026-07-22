@@ -6,6 +6,8 @@ import { connectActivityStream } from "@/lib/activity/client-stream";
 import { filterActivityEvents, type ActivityQuery } from "@/lib/activity/query";
 import { getActivityRefreshConfig } from "@/lib/env";
 import { type Activity, fetchActivity, generateMockActivity } from "@/lib/mock-data";
+import { invalidateFromActivityEvent, queryKeys } from "@/lib/cache/query-cache";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
 
 interface UseActivityFeedOptions extends Omit<ActivityQuery, "cursor"> {
   /** How many events to request per REST page. */
@@ -101,6 +103,19 @@ export function useActivityFeed({
     }),
     [limit, type, source, severity, entityType, actor, from, guildId]
   );
+  const activityQueryKey = useMemo(
+    () => queryKeys.activity(guildId ?? "unscoped", {
+      limit,
+      type,
+      source,
+      severity,
+      entityType,
+      actor: actor?.trim() || undefined,
+      from,
+    }),
+    [actor, entityType, from, guildId, limit, severity, source, type]
+  );
+  const cacheRevision = useQueryInvalidation(activityQueryKey);
 
   const hasFilters = Boolean(type || source || severity || entityType || actor?.trim() || from);
 
@@ -254,6 +269,7 @@ export function useActivityFeed({
         stopStream = connectActivityStream({
           onEvent: (event) => {
             prependLiveEvent(event);
+            invalidateFromActivityEvent(event.type, guildId ?? "unscoped");
             scheduleReconciliation();
           },
           onFallback: startPolling,
@@ -270,7 +286,7 @@ export function useActivityFeed({
       stopStream();
       stopPolling();
     };
-  }, [autoRefresh, fallbackIntervalMs, fetchLatest, prependLiveEvent]);
+  }, [autoRefresh, cacheRevision, fallbackIntervalMs, fetchLatest, guildId, prependLiveEvent]);
 
   return {
     events,
