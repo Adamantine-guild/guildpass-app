@@ -22,6 +22,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useGuild } from "@/lib/guild/GuildProvider";
 import { guildFetch } from "@/lib/guild/api";
 import { getPassesForGuild } from "@/lib/data/guild-scoped";
+import {
+  dashboardQueryCache,
+  invalidateAfterMutation,
+  queryKeys,
+} from "@/lib/cache/query-cache";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
 
 type ListState = "loading" | "loaded" | "unsupported" | "error";
 type PassStatusFilter = MockPass["status"] | "all";
@@ -60,6 +66,16 @@ export default function PassesPage() {
   const [page, setPage] = useState(1);
   const debouncedSearch = useDebouncedValue(search, 250);
   const previousPassesRef = useRef<MockPass[]>(passes);
+  const passesQueryKey = useMemo(
+    () => queryKeys.passes(guildId, {
+      page,
+      limit: PAGE_SIZE,
+      search: debouncedSearch.trim() || undefined,
+      status: status === "all" ? undefined : status,
+    }),
+    [debouncedSearch, guildId, page, status]
+  );
+  const cacheRevision = useQueryInvalidation(passesQueryKey);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
@@ -100,8 +116,10 @@ export default function PassesPage() {
         if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
         if (status !== "all") params.set("status", status);
 
-        const res = await guildFetch(`/api/passes?${params.toString()}`, guildId);
-        const data = await readApiResult<PaginatedResult<MockPass>>(res);
+        const data = await dashboardQueryCache.fetchQuery(passesQueryKey, async () => {
+          const res = await guildFetch(`/api/passes?${params.toString()}`, guildId);
+          return readApiResult<PaginatedResult<MockPass>>(res);
+        });
         if (!mounted) return;
 
         setPasses(data.items);
@@ -124,7 +142,7 @@ export default function PassesPage() {
     return () => {
       mounted = false;
     };
-  }, [apiMode, debouncedSearch, page, status, guildId]);
+  }, [apiMode, cacheRevision, debouncedSearch, guildId, page, passesQueryKey, status]);
 
   const updateMutation = useOptimisticMutation<MockPass, { id: string; data: Partial<MockPass> }>({
     mutationFn: async ({ id, data }) => {
@@ -150,6 +168,7 @@ export default function PassesPage() {
     },
     onSuccess: (updatedPass, { id }) => {
       setPasses((prev) => prev.map((p) => (p.id === id ? updatedPass : p)));
+      invalidateAfterMutation("pass", guildId);
       setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -288,6 +307,7 @@ export default function PassesPage() {
                     const newPass = await readApiResult<MockPass>(res);
                     setPasses((prev) => [newPass, ...prev].slice(0, pagination.limit));
                     setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+                    invalidateAfterMutation("pass", guildId);
                     setIsCreateOpen(false);
                     setForm({ name: "", description: "", price: "", maxSupply: "" });
                   } catch (error: unknown) {
