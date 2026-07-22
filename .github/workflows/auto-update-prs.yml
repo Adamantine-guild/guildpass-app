@@ -1,0 +1,22 @@
+name: Auto-update PR branches
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  update-prs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update open PR branches
+        run: |
+          prs=$(gh pr list --state open --json number -q '.[].number')
+          for pr in $prs; do
+            gh pr update-branch "$pr" || true
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
