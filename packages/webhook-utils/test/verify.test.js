@@ -1,5 +1,4 @@
-import { test, describe } from "node:test";
-import assert from "node:assert";
+import { test, describe } from "node:test";`nimport assert from "node:assert";`nimport { readFileSync } from "node:fs";
 import { verifySignature, generateSignature } from "../dist/index.js";
 
 describe("verifySignature", () => {
@@ -168,6 +167,24 @@ describe("verifySignature", () => {
         timestamp: futureTimestamp,
       });
 
+    test("should accept future timestamp within tolerance", () => {
+      const futureTimestamp = Math.floor(Date.now() / 1000) + 120;
+      const { signature } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+        timestamp: futureTimestamp,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.timestamp, futureTimestamp);
+    });
       const result = verifySignature({
         signatureHeader: signature,
         secret: SECRET,
@@ -240,6 +257,52 @@ describe("verifySignature", () => {
         payload: PAYLOAD,
       });
 
+    test("should reject empty v1 signature value", () => {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const result = verifySignature({
+        signatureHeader: `t=${timestamp},v1=`,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error.includes("signature"));
+    });
+
+    test("should accept valid header when segments are reordered and extra metadata is present", () => {
+      const { signature, timestamp } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+      const [, v1] = signature.split(",");
+
+      const result = verifySignature({
+        signatureHeader: `ignored=metadata,${v1},t=${timestamp}`,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.timestamp, timestamp);
+    });
+
+    test("should reject same-length wrong signature", () => {
+      const { signature, timestamp } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+      const [, v1] = signature.split(",");
+      const sameLengthWrongSignature = `${v1.slice(0, -2)}aa`;
+
+      const result = verifySignature({
+        signatureHeader: `t=${timestamp},${sameLengthWrongSignature}`,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.error, "Invalid signature");
+    });
       assert.strictEqual(result.valid, false);
       assert.ok(result.error.includes("timestamp"));
     });
@@ -360,6 +423,14 @@ describe("verifySignature", () => {
       });
 
       assert.strictEqual(result.valid, false);
+    });
+  });
+  describe("Timing-safe comparison smoke test", () => {
+    test("should use Node timingSafeEqual for same-length signature comparison", () => {
+      const source = readFileSync(new URL("../src/verify.ts", import.meta.url), "utf8");
+
+      assert.match(source, /timingSafeEqual/);
+      assert.match(source, /signatureBuffer\.length !== expectedBuffer\.length/);
     });
   });
 });
