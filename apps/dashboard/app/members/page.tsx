@@ -16,7 +16,7 @@ import { toMembersCsv } from "@/lib/members-csv";
 import type { Member as MockMember } from "@/lib/mock-data";
 import { canManageMembers } from "@/lib/permissions";
 import type { PaginatedResult } from "@/lib/repositories/types";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGuild } from "@/lib/guild/GuildProvider";
 import { guildFetch } from "@/lib/guild/api";
 import { getMembersForGuild } from "@/lib/data/guild-scoped";
@@ -25,7 +25,7 @@ import {
   invalidateAfterMutation,
   queryKeys,
 } from "@/lib/cache/query-cache";
-import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";`nimport { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 
 type ListState = "loading" | "loaded" | "unsupported" | "error";
@@ -44,11 +44,30 @@ const emptyPage: PaginatedResult<MockMember> = {
   hasPreviousPage: false,
 };
 
+function readStatusFilter(value: string | null): MemberStatusFilter {
+  return value === "active" || value === "inactive" || value === "pending" ? value : "all";
+}
+
+function readRoleFilter(value: string | null): MemberRoleFilter {
+  return value && MEMBER_ROLES.includes(value as (typeof MEMBER_ROLES)[number])
+    ? (value as MemberRoleFilter)
+    : "all";
+}
+
+function readPageFilter(value: string | null): number {
+  if (!value) return 1;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+}
+
 export default function MembersPage() {
   const session = useSession();
   const canWrite = canManageMembers(session, session.activeGuildId);
   const apiMode = getClientApiMode();
-  const { guildId, guild } = useGuild();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { guildId, guild, guilds, setGuildId } = useGuild();
 
   const seedMembers = getMembersForGuild(guildId);
   const [members, setMembers] = useState<MockMember[]>(seedMembers.slice(0, PAGE_SIZE));
@@ -60,10 +79,10 @@ export default function MembersPage() {
   });
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [listState, setListState] = useState<ListState>("loading");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<MemberStatusFilter>("all");
-  const [role, setRole] = useState<MemberRoleFilter>("all");
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
+  const [status, setStatus] = useState<MemberStatusFilter>(() => readStatusFilter(searchParams.get("status")));
+  const [role, setRole] = useState<MemberRoleFilter>(() => readRoleFilter(searchParams.get("role")));
+  const [page, setPage] = useState(() => readPageFilter(searchParams.get("page")));
   const debouncedSearch = useDebouncedValue(search, 250);
   const previousMembersRef = useRef<MockMember[]>(members);
   const membersQueryKey = useMemo(
@@ -82,6 +101,78 @@ export default function MembersPage() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [form, setForm] = useState({ name: "", wallet: "" });
 
+  const updateFilterQuery = useCallback(
+    (updates: { search?: string; status?: MemberStatusFilter; role?: MemberRoleFilter; guild?: string; page?: number | null }) => {
+      const next = new URLSearchParams(searchParams.toString());
+
+      if (updates.search !== undefined) {
+        const value = updates.search.trim();
+        value ? next.set("search", value) : next.delete("search");
+      }
+      if (updates.status !== undefined) {
+        updates.status === "all" ? next.delete("status") : next.set("status", updates.status);
+      }
+      if (updates.role !== undefined) {
+        updates.role === "all" ? next.delete("role") : next.set("role", updates.role);
+      }
+      if (updates.guild !== undefined) {
+        updates.guild ? next.set("guild", updates.guild) : next.delete("guild");
+      }
+      if (updates.page !== undefined) {
+        updates.page && updates.page > 1 ? next.set("page", String(updates.page)) : next.delete("page");
+      }
+
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+    updateFilterQuery({ search: value, page: null });
+  };
+
+  const handleStatusChange = (value: MemberStatusFilter) => {
+    setStatus(value);
+    setPage(1);
+    updateFilterQuery({ status: value, page: null });
+  };
+
+  const handleRoleChange = (value: MemberRoleFilter) => {
+    setRole(value);
+    setPage(1);
+    updateFilterQuery({ role: value, page: null });
+  };
+
+  const handleGuildFilterChange = (value: string) => {
+    setGuildId(value);
+    setPage(1);
+    updateFilterQuery({ guild: value, page: null });
+  };
+
+  const handlePageChange = (value: number) => {
+    const nextPage = Math.max(1, value);
+    setPage(nextPage);
+    updateFilterQuery({ page: nextPage === 1 ? null : nextPage });
+  };
+
+  useEffect(() => {
+    const nextSearch = searchParams.get("search") ?? "";
+    const nextStatus = readStatusFilter(searchParams.get("status"));
+    const nextRole = readRoleFilter(searchParams.get("role"));
+    const nextPage = readPageFilter(searchParams.get("page"));
+    const nextGuildId = searchParams.get("guild");
+
+    if (nextSearch !== search) setSearch(nextSearch);
+    if (nextStatus !== status) setStatus(nextStatus);
+    if (nextRole !== role) setRole(nextRole);
+    if (nextPage !== page) setPage(nextPage);
+    if (nextGuildId && nextGuildId !== guildId && guilds.some((candidate) => candidate.id === nextGuildId)) {
+      setGuildId(nextGuildId);
+    }
+  }, [guildId, guilds, page, role, search, searchParams, setGuildId, status]);
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, role, status, guildId]);
@@ -285,22 +376,36 @@ export default function MembersPage() {
       {listState !== "unsupported" && (
         <div className="mb-4 space-y-3">
           {/* Search + Status row */}
-          <div className="grid gap-3 lg:grid-cols-[1fr_180px]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_220px_180px]">
             <label className="block">
               <span className="sr-only">Search members</span>
               <input
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => handleSearchChange(event.target.value)}
                 placeholder="Search by name or wallet"
                 className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
               />
+            </label>
+            <label className="block">
+              <span className="sr-only">Filter by guild</span>
+              <select
+                value={guildId}
+                onChange={(event) => handleGuildFilterChange(event.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              >
+                {guilds.map((guildOption) => (
+                  <option key={guildOption.id} value={guildOption.id}>
+                    {guildOption.name}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className="block">
               <span className="sr-only">Filter by status</span>
               <select
                 value={status}
-                onChange={(event) => setStatus(event.target.value as MemberStatusFilter)}
+                onChange={(event) => handleStatusChange(event.target.value as MemberStatusFilter)}
                 className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
               >
                 <option value="all">All statuses</option>
@@ -316,7 +421,7 @@ export default function MembersPage() {
             <span className="text-sm text-slate-500">Role:</span>
             <button
               type="button"
-              onClick={() => setRole("all")}
+              onClick={() => handleRoleChange("all")} 
               aria-pressed={role === "all"}
               className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 ${
                 role === "all"
@@ -330,7 +435,7 @@ export default function MembersPage() {
               <button
                 key={memberRole}
                 type="button"
-                onClick={() => setRole(memberRole)}
+                onClick={() => handleRoleChange(memberRole)}
                 aria-pressed={role === memberRole}
                 className={`rounded-full border px-3 py-1.5 text-sm font-medium capitalize transition-colors focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 ${
                   role === memberRole
@@ -443,7 +548,7 @@ export default function MembersPage() {
 
           {members.length === 0 && (
             <div className="mt-4">
-              <EmptyState title="No members match your filters" description="Adjust the search, status, or role filter to see more members." icon="-" />
+              <EmptyState title="No members match your filters" description="Adjust the search, guild, status, or role filter to see more members." icon="-" />
             </div>
           )}
 
@@ -451,8 +556,8 @@ export default function MembersPage() {
             page={pagination.page}
             hasPreviousPage={pagination.hasPreviousPage}
             hasNextPage={pagination.hasNextPage}
-            onPrevious={() => setPage((current) => Math.max(1, current - 1))}
-            onNext={() => setPage((current) => current + 1)}
+            onPrevious={() => handlePageChange(page - 1)}
+            onNext={() => handlePageChange(page + 1)}
           />
         </>
       )}
