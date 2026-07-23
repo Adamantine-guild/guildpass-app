@@ -28,7 +28,8 @@
     "react-dom": "18.3.1",
     "@guildpass/integration-client": "workspace:*",
     "@guildpass/webhook-utils": "workspace:*",
-    "@guildpass/metrics": "workspace:*"
+    "@guildpass/metrics": "workspace:*",
+    "@guildpass/env": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

@@ -1,35 +1,89 @@
-<<<<<<< HEAD
-﻿export const env = {
+/**
+ * Centralized, validated environment configuration for the dashboard.
+ *
+ * All environment access flows through the shared `dashboardEnvSchema` from
+ * `@guildpass/env`. On the server, variables are validated lazily on first
+ * access (see `getValidatedEnv` / `validateStartupEnv`): mode-dependent
+ * requirements are enforced with cross-field rules, e.g.
+ * `DASHBOARD_API_MODE=live` requires `GUILD_PASS_CORE_URL`,
+ * `GUILD_PASS_CORE_API_KEY` and `WEBHOOK_SECRET`, and
+ * `DASHBOARD_STORAGE_MODE=durable` requires `DATABASE_URL`. Failures throw
+ * `EnvValidationError` listing every missing/invalid variable.
+ *
+ * Client bundles never see server-only secrets (`GUILD_PASS_CORE_API_KEY`,
+ * `WEBHOOK_SECRET`, `DATABASE_URL`, ...): Next.js only inlines
+ * `NEXT_PUBLIC_*` variables, and this module skips validation in the browser
+ * (`process.env` there only ever contains the inlined public values).
+ */
+
+import {
+  dashboardEnvSchema,
+  validateEnv,
+  type DashboardEnv,
+} from "@guildpass/env";
+import { PublicApiError } from "./api-errors";
+
+const isServer = typeof window === "undefined";
+
+let cachedEnv: DashboardEnv | null = null;
+
+/**
+ * Validate `process.env` against the dashboard schema (once, then cached).
+ * Server-only: throws `EnvValidationError` with an actionable message naming
+ * every missing or invalid variable.
+ */
+function getValidatedEnv(): DashboardEnv {
+  if (cachedEnv) return cachedEnv;
+  cachedEnv = validateEnv(dashboardEnvSchema);
+  return cachedEnv;
+}
+
+/**
+ * Explicit startup validation hook. Call this early in server startup (or in
+ * a health/ready probe) to fail fast on misconfiguration instead of deep in a
+ * request handler. Returns the typed, validated environment.
+ */
+export function validateStartupEnv(): DashboardEnv {
+  return getValidatedEnv();
+}
+
+/**
+ * Raw, unvalidated environment as seen by legacy callers. Used only in
+ * browser bundles where validation is skipped (secrets are never shipped to
+ * the client, and only `NEXT_PUBLIC_*` values are inlined).
+ */
+const rawEnv = {
   GUILD_PASS_CORE_URL: process.env.GUILD_PASS_CORE_URL,
   GUILD_PASS_CORE_API_KEY: process.env.GUILD_PASS_CORE_API_KEY,
   WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
+  WEBHOOK_SECRET_PREVIOUS: process.env.WEBHOOK_SECRET_PREVIOUS,
   ACTIVITY_STORAGE_MODE: process.env.ACTIVITY_STORAGE_MODE,
   ACTIVITY_STORAGE_DIR: process.env.ACTIVITY_STORAGE_DIR,
-  // API mode for dashboard: 'mock' (default) or 'live'
   DASHBOARD_API_MODE: process.env.DASHBOARD_API_MODE || "mock",
-  // Storage mode for data persistence: 'mock' (default, in-memory) or 'durable' (backend)
   DASHBOARD_STORAGE_MODE: process.env.DASHBOARD_STORAGE_MODE || "mock",
-  // Storage connection string (required when DASHBOARD_STORAGE_MODE is 'durable')
   DATABASE_URL: process.env.DATABASE_URL,
-=======
-﻿import { PublicApiError } from "./api-errors";
-
-export const env = {
-GUILD_PASS_CORE_URL: process.env.GUILD_PASS_CORE_URL,
-GUILD_PASS_CORE_API_KEY: process.env.GUILD_PASS_CORE_API_KEY,
-WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
-WEBHOOK_SECRET_PREVIOUS: process.env.WEBHOOK_SECRET_PREVIOUS,
-ACTIVITY_STORAGE_MODE: process.env.ACTIVITY_STORAGE_MODE,
-ACTIVITY_STORAGE_DIR: process.env.ACTIVITY_STORAGE_DIR,
-DASHBOARD_API_MODE: process.env.DASHBOARD_API_MODE || "mock",
-DASHBOARD_STORAGE_MODE: process.env.DASHBOARD_STORAGE_MODE || "mock",
-DATABASE_URL: process.env.DATABASE_URL,
->>>>>>> main
+  NEXT_PUBLIC_ACTIVITY_REFRESH_MS: process.env.NEXT_PUBLIC_ACTIVITY_REFRESH_MS,
 };
 
+function readEnv(): DashboardEnv {
+  if (!isServer) return rawEnv as DashboardEnv;
+  return getValidatedEnv();
+}
+
+/**
+ * Backwards-compatible environment object. Property access is lazy: on the
+ * server the first read triggers full schema validation, so a misconfigured
+ * deployment fails with a clear error naming the offending variables.
+ */
+export const env: DashboardEnv = new Proxy({} as DashboardEnv, {
+  get(_target, prop: string) {
+    return readEnv()[prop as keyof DashboardEnv];
+  },
+});
+
 export interface ActivityRefreshConfig {
-intervalMs: number;
-maxEvents: number;
+  intervalMs: number;
+  maxEvents: number;
 }
 
 const DEFAULT_REFRESH_MS = 15_000;
@@ -60,14 +114,12 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 }
 
 export function getApiMode(): "mock" | "live" {
-  const m = (process.env.DASHBOARD_API_MODE || env.DASHBOARD_API_MODE)?.toLowerCase();
+  const m = (readEnv().DASHBOARD_API_MODE || "mock")?.toLowerCase();
   return m === "live" ? "live" : "mock";
 }
 
 export function getStorageMode(): "mock" | "durable" {
-  const m = (
-    process.env.DASHBOARD_STORAGE_MODE || env.DASHBOARD_STORAGE_MODE
-  )?.toLowerCase();
+  const m = (readEnv().DASHBOARD_STORAGE_MODE || "mock")?.toLowerCase();
   return m === "durable" ? "durable" : "mock";
 }
 
@@ -78,7 +130,7 @@ export interface StorageConfig {
 
 export function getStorageConfig(): StorageConfig {
   const mode = getStorageMode();
-  const connectionString = process.env.DATABASE_URL || env.DATABASE_URL || "";
+  const connectionString = readEnv().DATABASE_URL || "";
 
   if (mode === "durable" && !connectionString) {
     throw new Error(
@@ -90,26 +142,16 @@ export function getStorageConfig(): StorageConfig {
 }
 
 export function getEnv() {
-  const GUILD_PASS_CORE_URL =
-    process.env.GUILD_PASS_CORE_URL || env.GUILD_PASS_CORE_URL;
-  const GUILD_PASS_CORE_API_KEY =
-    process.env.GUILD_PASS_CORE_API_KEY || env.GUILD_PASS_CORE_API_KEY;
-  const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || env.WEBHOOK_SECRET;
-  const ACTIVITY_STORAGE_MODE =
-    process.env.ACTIVITY_STORAGE_MODE || env.ACTIVITY_STORAGE_MODE;
-  const ACTIVITY_STORAGE_DIR =
-    process.env.ACTIVITY_STORAGE_DIR || env.ACTIVITY_STORAGE_DIR;
-  const apiMode = getApiMode();
-  const storageMode = getStorageMode();
+  const current = readEnv();
 
   return {
-    GUILD_PASS_CORE_URL,
-    GUILD_PASS_CORE_API_KEY,
-    WEBHOOK_SECRET,
-    ACTIVITY_STORAGE_MODE,
-    ACTIVITY_STORAGE_DIR,
-    apiMode,
-    storageMode,
+    GUILD_PASS_CORE_URL: current.GUILD_PASS_CORE_URL,
+    GUILD_PASS_CORE_API_KEY: current.GUILD_PASS_CORE_API_KEY,
+    WEBHOOK_SECRET: current.WEBHOOK_SECRET,
+    ACTIVITY_STORAGE_MODE: current.ACTIVITY_STORAGE_MODE,
+    ACTIVITY_STORAGE_DIR: current.ACTIVITY_STORAGE_DIR,
+    apiMode: getApiMode(),
+    storageMode: getStorageMode(),
   };
 }
 
