@@ -68,8 +68,7 @@ export function useActivityFeed({
   severity,
   entityType,
   actor,
-  from,
-  refreshIntervalMs,
+  from,`n  sort,`n  refreshIntervalMs,
   autoRefresh = true,
   simulate = true,
   guildId,
@@ -98,10 +97,9 @@ export function useActivityFeed({
       severity,
       entityType,
       actor: actor?.trim() || undefined,
-      from,
-      guildId,
+      from,`n      sort,`n      guildId,
     }),
-    [limit, type, source, severity, entityType, actor, from, guildId]
+    [limit, type, source, severity, entityType, actor, from, sort, guildId]
   );
   const activityQueryKey = useMemo(
     () => queryKeys.activity(guildId ?? "unscoped", {
@@ -111,9 +109,8 @@ export function useActivityFeed({
       severity,
       entityType,
       actor: actor?.trim() || undefined,
-      from,
-    }),
-    [actor, entityType, from, guildId, limit, severity, source, type]
+      from,`n      sort,`n    }),
+    [actor, entityType, from, guildId, limit, severity, source, sort, type]
   );
   const cacheRevision = useQueryInvalidation(activityQueryKey);
 

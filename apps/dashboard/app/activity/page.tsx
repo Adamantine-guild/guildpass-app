@@ -11,8 +11,8 @@ import {
   type ActivityEventType,
 } from "@guildpass/integration-client";
 import type { ActivityChange } from "@guildpass/integration-client";
-import { useMemo, useState } from "react";
-import { useGuild } from "@/lib/guild/GuildProvider";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useGuild } from "@/lib/guild/GuildProvider";`nimport { usePathname, useRouter, useSearchParams } from "next/navigation";`nimport type { ActivitySortOrder } from "@/lib/activity/query";
 
 const TYPE_ICON: Record<ActivityEventType, string> = {
   "member.joined": "👤",
@@ -78,14 +78,74 @@ const SEVERITY_FILTERS: { label: string; value: ActivityEventSeverity | "" }[] =
   { label: "Critical", value: "critical" },
 ];
 
+const SORT_OPTIONS: { label: string; value: ActivitySortOrder }[] = [
+  { label: "Newest first", value: "newest" },
+  { label: "Oldest first", value: "oldest" },
+];
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+
+function readSort(value: string | null): ActivitySortOrder {
+  return value === "oldest" ? "oldest" : "newest";
+}
+
+function readLimit(value: string | null): number {
+  const parsed = Number(value);
+  return PAGE_SIZE_OPTIONS.includes(parsed as (typeof PAGE_SIZE_OPTIONS)[number]) ? parsed : 10;
+}
 export default function ActivityPage() {
-  const { guildId, guild } = useGuild();
-  const [type, setType] = useState<ActivityEventType | "">("");
-  const [source, setSource] = useState<ActivityEventSource | "">("");
-  const [severity, setSeverity] = useState<ActivityEventSeverity | "">("");
-  const [actor, setActor] = useState("");
-  const [from, setFrom] = useState("");
+  const { guildId, guild } = useGuild();`n  const router = useRouter();`n  const pathname = usePathname();`n  const searchParams = useSearchParams();`n  const [type, setType] = useState<ActivityEventType | "">(() => (searchParams.get("type") as ActivityEventType | null) ?? "");`n  const [source, setSource] = useState<ActivityEventSource | "">(() => (searchParams.get("source") as ActivityEventSource | null) ?? "");`n  const [severity, setSeverity] = useState<ActivityEventSeverity | "">(() => (searchParams.get("severity") as ActivityEventSeverity | null) ?? "");`n  const [actor, setActor] = useState(() => searchParams.get("actor") ?? "");`n  const [from, setFrom] = useState(() => searchParams.get("from") ?? "");`n  const [sort, setSort] = useState<ActivitySortOrder>(() => readSort(searchParams.get("sort")));`n  const [limit, setLimit] = useState(() => readLimit(searchParams.get("limit")));
   const { intervalMs } = getActivityRefreshConfig();
+  const updateActivityQuery = useCallback(
+    (updates: {
+      type?: ActivityEventType | "";
+      source?: ActivityEventSource | "";
+      severity?: ActivityEventSeverity | "";
+      actor?: string;
+      from?: string;
+      sort?: ActivitySortOrder;
+      limit?: number;
+    }) => {
+      const next = new URLSearchParams(searchParams.toString());
+      const setOrDelete = (key: string, value: string) => {
+        value.trim() ? next.set(key, value.trim()) : next.delete(key);
+      };
+
+      if (updates.type !== undefined) setOrDelete("type", updates.type);
+      if (updates.source !== undefined) setOrDelete("source", updates.source);
+      if (updates.severity !== undefined) setOrDelete("severity", updates.severity);
+      if (updates.actor !== undefined) setOrDelete("actor", updates.actor);
+      if (updates.from !== undefined) setOrDelete("from", updates.from);
+      if (updates.sort !== undefined) {
+        updates.sort === "newest" ? next.delete("sort") : next.set("sort", updates.sort);
+      }
+      if (updates.limit !== undefined) {
+        updates.limit === 10 ? next.delete("limit") : next.set("limit", String(updates.limit));
+      }
+
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  useEffect(() => {
+    const nextType = (searchParams.get("type") as ActivityEventType | null) ?? "";
+    const nextSource = (searchParams.get("source") as ActivityEventSource | null) ?? "";
+    const nextSeverity = (searchParams.get("severity") as ActivityEventSeverity | null) ?? "";
+    const nextActor = searchParams.get("actor") ?? "";
+    const nextFrom = searchParams.get("from") ?? "";
+    const nextSort = readSort(searchParams.get("sort"));
+    const nextLimit = readLimit(searchParams.get("limit"));
+
+    if (nextType !== type) setType(nextType);
+    if (nextSource !== source) setSource(nextSource);
+    if (nextSeverity !== severity) setSeverity(nextSeverity);
+    if (nextActor !== actor) setActor(nextActor);
+    if (nextFrom !== from) setFrom(nextFrom);
+    if (nextSort !== sort) setSort(nextSort);
+    if (nextLimit !== limit) setLimit(nextLimit);
+  }, [actor, from, limit, searchParams, severity, sort, source, type]);
 
   const fromIso = useMemo(() => {
     if (!from) return undefined;
@@ -105,26 +165,25 @@ export default function ActivityPage() {
     loadMore,
     refresh,
   } = useActivityFeed({
-    limit: 10,
+    limit,
     type: type || undefined,
     source: source || undefined,
     severity: severity || undefined,
     actor: actor.trim() || undefined,
-    from: fromIso,
+    from: fromIso,`n    sort,
     autoRefresh: true,
     simulate: false,
     guildId,
   });
 
-  const hasActiveFilters = Boolean(type || source || severity || actor.trim() || from);
+  const hasActiveFilters = Boolean(type || source || severity || actor.trim() || from || sort !== "newest" || limit !== 10);
 
   const clearFilters = () => {
     setType("");
     setSource("");
     setSeverity("");
     setActor("");
-    setFrom("");
-  };
+    setFrom("");`n    setSort("newest");`n    setLimit(10);`n    updateActivityQuery({ type: "", source: "", severity: "", actor: "", from: "", sort: "newest", limit: 10 });`n  };
 
   return (
     <DashboardLayout
@@ -164,12 +223,12 @@ export default function ActivityPage() {
       </div>
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
           <label className="text-xs font-medium text-slate-600">
             Event type
             <select
               value={type}
-              onChange={(event) => setType(event.target.value as ActivityEventType | "")}
+              onChange={(event) => { const value = event.target.value as ActivityEventType | ""; setType(value); updateActivityQuery({ type: value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             >
               {TYPE_FILTERS.map((option) => (
@@ -184,7 +243,7 @@ export default function ActivityPage() {
             Source
             <select
               value={source}
-              onChange={(event) => setSource(event.target.value as ActivityEventSource | "")}
+              onChange={(event) => { const value = event.target.value as ActivityEventSource | ""; setSource(value); updateActivityQuery({ source: value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             >
               {SOURCE_FILTERS.map((option) => (
@@ -199,7 +258,7 @@ export default function ActivityPage() {
             Severity
             <select
               value={severity}
-              onChange={(event) => setSeverity(event.target.value as ActivityEventSeverity | "")}
+              onChange={(event) => { const value = event.target.value as ActivityEventSeverity | ""; setSeverity(value); updateActivityQuery({ severity: value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             >
               {SEVERITY_FILTERS.map((option) => (
@@ -214,7 +273,7 @@ export default function ActivityPage() {
             Actor
             <input
               value={actor}
-              onChange={(event) => setActor(event.target.value)}
+              onChange={(event) => { setActor(event.target.value); updateActivityQuery({ actor: event.target.value }); }}
               placeholder="Name or wallet"
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             />
@@ -225,9 +284,46 @@ export default function ActivityPage() {
             <input
               type="datetime-local"
               value={from}
-              onChange={(event) => setFrom(event.target.value)}
+              onChange={(event) => { setFrom(event.target.value); updateActivityQuery({ from: event.target.value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             />
+          </label>
+          <label className="text-xs font-medium text-slate-600">
+            Sort
+            <select
+              value={sort}
+              onChange={(event) => {
+                const value = event.target.value as ActivitySortOrder;
+                setSort(value);
+                updateActivityQuery({ sort: value });
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-xs font-medium text-slate-600">
+            Page size
+            <select
+              value={limit}
+              onChange={(event) => {
+                const value = readLimit(event.target.value);
+                setLimit(value);
+                updateActivityQuery({ limit: value });
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} per page
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
