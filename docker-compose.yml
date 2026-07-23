@@ -1,0 +1,97 @@
+# =============================================================================
+# GuildPass — Production-like local deployment
+# =============================================================================
+# Start with:
+#   docker compose build
+#   docker compose up -d
+#
+# Before starting, copy the environment template and fill in your values:
+#   cp .env.example .env
+#
+# Note: This compose file is designed for **production-like** local testing.
+# For actual production, consider using Kubernetes, ECS, or similar.
+# =============================================================================
+
+services:
+  # ── PostgreSQL (shared database) ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: guildpass-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: guildpass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-guildpass_dev}
+      POSTGRES_DB: guildpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guildpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Access API (blockchain indexer + core API) ─────────────────────
+  access-api:
+    build:
+      context: .
+      dockerfile: apps/access-api/Dockerfile
+    container_name: guildpass-access-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://guildpass:${POSTGRES_PASSWORD:-guildpass_dev}@postgres:5432/guildpass?schema=public
+      PORT: "3001"
+      HOST: "0.0.0.0"
+    ports:
+      - "3001:3001"
+
+  # ── Dashboard (Next.js web app) ─────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    container_name: guildpass-dashboard
+    restart: unless-stopped
+    depends_on:
+      - access-api
+    env_file:
+      - .env
+    environment:
+      DASHBOARD_API_MODE: ${DASHBOARD_API_MODE:-live}
+      DASHBOARD_STORAGE_MODE: ${DASHBOARD_STORAGE_MODE:-durable}
+      GUILD_PASS_CORE_URL: http://access-api:3001
+      DATABASE_URL: postgresql://guildpass:${POSTGRES_PASSWORD:-guildpass_dev}@postgres:5432/guildpass?schema=public
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+      ACTIVITY_STORAGE_MODE: file
+      ACTIVITY_STORAGE_DIR: /app/apps/dashboard/.guildpass-activity
+    ports:
+      - "3000:3000"
+
+  # ── Discord Bot ─────────────────────────────────────────────────────
+  discord-bot:
+    build:
+      context: .
+      dockerfile: apps/discord-bot/Dockerfile
+    container_name: guildpass-discord-bot
+    restart: unless-stopped
+    depends_on:
+      - access-api
+    env_file:
+      - .env
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?DISCORD_TOKEN is required}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?DISCORD_CLIENT_ID is required}
+      GUILD_PASS_CORE_URL: http://access-api:3001
+    profiles:
+      - discord-bot
+    # Use --profile discord-bot to start the bot:
+    #   docker compose --profile discord-bot up -d
+
+volumes:
+  pgdata:
