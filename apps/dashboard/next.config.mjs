@@ -2,6 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: [
+    "@guildpass/env",
     "@guildpass/integration-client",
     "@guildpass/webhook-utils",
   ],
