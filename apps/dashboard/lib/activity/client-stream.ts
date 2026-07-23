@@ -13,11 +13,17 @@ export interface ActivityStreamConnectionOptions {
   onEvent: (event: ActivityEvent) => void;
   onFallback: () => void;
   onReady?: () => void;
+  reconnectBaseDelayMs?: number;
+  reconnectJitterRatio?: number;
+  reconnectMaxDelayMs?: number;
   url?: string;
 }
 
 const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000;
+const DEFAULT_RECONNECT_BASE_DELAY_MS = 1_000;
+const DEFAULT_RECONNECT_JITTER_RATIO = 0.25;
+const DEFAULT_RECONNECT_MAX_DELAY_MS = 30_000;
 
 export function connectActivityStream({
   connectionTimeoutMs = DEFAULT_CONNECTION_TIMEOUT_MS,
@@ -26,12 +32,18 @@ export function connectActivityStream({
   onEvent,
   onFallback,
   onReady = () => {},
+  reconnectBaseDelayMs = DEFAULT_RECONNECT_BASE_DELAY_MS,
+  reconnectJitterRatio = DEFAULT_RECONNECT_JITTER_RATIO,
+  reconnectMaxDelayMs = DEFAULT_RECONNECT_MAX_DELAY_MS,
   url = "/api/activity/stream",
 }: ActivityStreamConnectionOptions): () => void {
   let source: ActivityEventSourceLike | null = null;
   let stopped = false;
   let fallbackStarted = false;
-  let ready = false;
+  let connectionReady = false;
+  let lastEventId: string | null = null;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
 
   const clearWatchdog = () => {
@@ -40,20 +52,28 @@ export function connectActivityStream({
     watchdog = null;
   };
 
-  const armWatchdog = (timeoutMs: number) => {
+  const clearReconnectTimer = () => {
+    if (reconnectTimer === null) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  };
+
+  const armWatchdog = (timeoutMs: number, onTimeout: () => void) => {
     clearWatchdog();
-    watchdog = setTimeout(startFallback, timeoutMs);
+    watchdog = setTimeout(onTimeout, timeoutMs);
   };
 
   const markAlive = () => {
     if (stopped || fallbackStarted) return;
-    armWatchdog(heartbeatTimeoutMs);
+    armWatchdog(heartbeatTimeoutMs, scheduleReconnect);
   };
 
   const onActivity = ((rawEvent: Event) => {
     markAlive();
     const event = parseActivityEvent(rawEvent);
-    if (event) onEvent(event);
+    if (!event) return;
+    lastEventId = event.id;
+    onEvent(event);
   }) as EventListener;
 
   const onHeartbeat = (() => {
@@ -61,8 +81,9 @@ export function connectActivityStream({
   }) as EventListener;
 
   const onReadyEvent = (() => {
-    const firstReady = !ready;
-    ready = true;
+    const firstReady = !connectionReady;
+    connectionReady = true;
+    reconnectAttempt = 0;
     markAlive();
     if (firstReady) onReady();
   }) as EventListener;
@@ -78,30 +99,69 @@ export function connectActivityStream({
     source = null;
   };
 
+  const streamUrl = () => {
+    if (!lastEventId) return url;
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}lastEventId=${encodeURIComponent(lastEventId)}`;
+  };
+
   const startFallback = () => {
     if (stopped || fallbackStarted) return;
     fallbackStarted = true;
+    clearReconnectTimer();
     detach();
     onFallback();
   };
 
+  const reconnectDelay = () => {
+    const exponentialDelay = Math.min(
+      reconnectMaxDelayMs,
+      reconnectBaseDelayMs * 2 ** reconnectAttempt
+    );
+    const jitter = exponentialDelay * reconnectJitterRatio * Math.random();
+    reconnectAttempt += 1;
+    return Math.round(exponentialDelay + jitter);
+  };
+
+  const scheduleReconnect = () => {
+    if (stopped || fallbackStarted) return;
+    if (!connectionReady) {
+      startFallback();
+      return;
+    }
+
+    detach();
+    clearReconnectTimer();
+    reconnectTimer = setTimeout(connect, reconnectDelay());
+  };
+
   const onError = (() => {
-    startFallback();
+    scheduleReconnect();
   }) as EventListener;
 
-  try {
-    source = createEventSource(url);
+  const connect = () => {
+    if (stopped || fallbackStarted) return;
+    connectionReady = false;
+
+    try {
+      source = createEventSource(streamUrl());
+    } catch {
+      startFallback();
+      return;
+    }
+
     source.addEventListener("activity", onActivity);
     source.addEventListener("error", onError);
     source.addEventListener("heartbeat", onHeartbeat);
     source.addEventListener("ready", onReadyEvent);
-    armWatchdog(connectionTimeoutMs);
-  } catch {
-    startFallback();
-  }
+    armWatchdog(connectionTimeoutMs, startFallback);
+  };
+
+  connect();
 
   return () => {
     stopped = true;
+    clearReconnectTimer();
     detach();
   };
 }
