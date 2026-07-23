@@ -2,6 +2,7 @@
 
 import DashboardLayout from "@/components/DashboardLayout";
 import LastUpdated from "@/components/LastUpdated";
+import WalletAddressText from "@/components/WalletAddressText";
 import { getActivityRefreshConfig } from "@/lib/env";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
@@ -374,7 +375,7 @@ export default function ActivityPage() {
                       </div>
                     </div>
                     <p className="mt-0.5 text-sm text-slate-500">
-                      by {activity.actor.name || activity.actor.wallet || "System"}
+                      by {activity.actor.name || (activity.actor.wallet ? <WalletAddressText address={activity.actor.wallet} /> : "System")}
                     </p>
                     {activity.entity && (
                       <p className="mt-1 text-xs text-slate-400">

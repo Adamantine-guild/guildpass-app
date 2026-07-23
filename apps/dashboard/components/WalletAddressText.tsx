@@ -1,24 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import { formatWalletAddress } from "@/lib/formatters/wallet";
 
-type TruncatedWalletProps = {
-  address: string;
+type WalletAddressTextProps = {
+  address?: string | null;
   prefixLength?: number;
   suffixLength?: number;
 };
 
-export default function TruncatedWallet({
+export default function WalletAddressText({
   address,
   prefixLength = 6,
   suffixLength = 4,
-}: TruncatedWalletProps) {
+}: WalletAddressTextProps) {
   const [copied, setCopied] = useState(false);
 
-  const truncated =
-    address.length > prefixLength + suffixLength
-      ? `${address.slice(0, prefixLength)}…${address.slice(-suffixLength)}`
-      : address;
+  if (!address) {
+    return <span className="font-mono text-sm text-slate-400">—</span>;
+  }
+
+  const truncated = formatWalletAddress(address, prefixLength, suffixLength);
 
   const handleCopy = async () => {
     try {
@@ -32,7 +34,7 @@ export default function TruncatedWallet({
 
   return (
     <span className="relative inline-flex items-center gap-1.5 font-mono text-sm text-slate-600">
-      <span title={address}>{truncated}</span>
+      <span title={address} aria-label={`Wallet address: ${address}`}>{truncated}</span>
       <button
         type="button"
         onClick={handleCopy}
@@ -55,7 +57,7 @@ export default function TruncatedWallet({
       </button>
 
       {copied && (
-        <span className="absolute -top-7 left-0 rounded bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-sm">
+        <span className="absolute -top-7 left-0 z-10 rounded bg-slate-800 px-2 py-1 text-xs font-medium text-white shadow-sm">
           Copied!
         </span>
       )}

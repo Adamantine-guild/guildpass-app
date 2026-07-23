@@ -1,11 +1,11 @@
-﻿"use client";
+"use client";
 
 import DashboardLayout from "@/components/DashboardLayout";
 import EmptyState from "@/components/EmptyState";
 import PaginationControls from "@/components/PaginationControls";
 import RoleEditor from "@/components/RoleEditor";
 import StatusBadge from "@/components/StatusBadge";
-import TruncatedWallet from "@/components/TruncatedWallet";
+import WalletAddressText from "@/components/WalletAddressText";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
 import { ApiClientError, readApiResult } from "@/lib/api-client";
 import { getClientApiMode } from "@/lib/client-env";
@@ -525,7 +525,7 @@ export default function MembersPage() {
                           {member.name}
                           {isPending && <span className="ml-2 text-xs text-slate-400">(updating...)</span>}
                         </td>
-                        <td className="px-6 py-4"><TruncatedWallet address={member.wallet} /></td>
+                        <td className="px-6 py-4"><WalletAddressText address={member.wallet} /></td>
                         <td className="px-6 py-4"><StatusBadge status={member.status} /></td>
                         <td className="px-6 py-4 text-slate-600">
                           <RoleEditor roles={member.roles ?? []} disabled={!canWrite || isPending} onChange={(roles) => handleRolesChange(member.id, roles)} />
