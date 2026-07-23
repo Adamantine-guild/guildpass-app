@@ -1,5 +1,4 @@
-name: Trigger Auto Merge Automation
-
+name: Trigger PR Automation
 on:
   pull_request_target:
     types:
@@ -7,24 +6,23 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-
 permissions:
   contents: read
-
 jobs:
-  trigger-auto-merge:
-    name: Trigger central PR automation
+  notify:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Trigger automation repo
+      - name: Notify automation repository
         env:
-          GH_TOKEN: ${{ secrets.POCKETPAY_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
         run: |
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
-            /repos/Axionvera/pocketpay-issue-automation/dispatches \
-            -f event_type=pocketpay-pr-opened \
+            /repos/Adamantine-guild/adamantine-pr-automation/dispatches \
+            -f event_type=pr-updated \
             -F client_payload[repo]="${{ github.repository }}" \
-            -F client_payload[pr_number]="${{ github.event.pull_request.number }}"
+            -F client_payload[pr_number]="${{ github.event.pull_request.number }}" \
+            -F client_payload[campaign]="grantfox-oss" \
+            -F client_payload[pr_author]="${{ github.event.pull_request.user.login }}" \
+            -F client_payload[is_fork]="${{ github.event.pull_request.head.repo.fork }}"
