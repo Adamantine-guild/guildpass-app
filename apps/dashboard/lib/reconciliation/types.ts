@@ -8,8 +8,6 @@
  * tables (Member / Pass).
  */
 
-import type { ActivityChange } from "@guildpass/integration-client";
-
 /** The field that was found to be inconsistent. */
 export type DriftedField = "memberCount" | "passCount";
 

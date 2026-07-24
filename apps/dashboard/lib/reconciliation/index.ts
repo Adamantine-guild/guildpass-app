@@ -16,7 +16,6 @@ import type {
   ReconciliationReport,
   GuildDiscrepancy,
   ReconcileOptions,
-  DriftedField,
 } from "./types";
 import type { Guild } from "../mock-data";
 import type { ActivityChange } from "@guildpass/integration-client";

@@ -14,6 +14,52 @@ export type IntegrationClientOptions = {
   apiKey?: string; // IC: 107
   transport?: TransportConfig;
 }; // IC: 108
+
+/**
+ * A pass as reported by GuildPass core in a guild snapshot.
+ *
+ * Core is the authority for pass lifecycle state; the dashboard reconciles
+ * its local copy against these records. `status` uses the dashboard's
+ * vocabulary ("draft" never appears — drafts are dashboard-local).
+ */
+export type CorePassSnapshot = {
+  id: string;
+  name: string;
+  status: "active" | "inactive";
+  description?: string;
+  price?: number;
+  maxSupply?: number | null;
+  currentSupply?: number;
+};
+
+/** Guild-level metadata as reported by core in a snapshot. */
+export type CoreGuildInfo = {
+  name?: string;
+  description?: string;
+};
+
+/**
+ * Point-in-time authoritative state for one guild, served by GuildPass core
+ * at `GET /v1/guilds/:guildId/snapshot`.
+ *
+ * Reconciliation contract (see docs/core-reconciliation.md):
+ *  - `members` is the COMPLETE active membership list for the guild at
+ *    `generatedAt`. A member absent from the list is treated as no longer
+ *    a member (dashboard deactivates its local copy).
+ *  - `passes` is the complete list of core-managed passes. Passes that only
+ *    exist locally (e.g. dashboard-created drafts) are NOT touched by
+ *    reconciliation, since core has no knowledge of them.
+ *  - Core implementations that do not support snapshots respond 404, which
+ *    the client surfaces as `null` so callers can degrade gracefully.
+ */
+export type GuildSnapshot = {
+  guildId: string;
+  /** ISO timestamp at which core generated the snapshot. */
+  generatedAt: string;
+  guild?: CoreGuildInfo;
+  members: Membership[];
+  passes: CorePassSnapshot[];
+};
 export type VerificationResult = {
   userId: string; // IC: 109
   wallet: string; // IC: 110
@@ -42,7 +88,7 @@ export type ActivityEventType =
   | "webhook.received"
   | "activity.permission_denied";
 
-export type ActivityEventSource = "dashboard" | "webhook" | "core_api";
+export type ActivityEventSource = "dashboard" | "webhook" | "core_api" | "reconciliation";
 
 export type ActivityEventSeverity = "info" | "warning" | "error" | "critical";
 
