@@ -1,38 +1,27 @@
 import type { ActivityEvent } from "./types";
+import { getActivityPubSub, type ActivitySubscriber } from "./pubsub";
 
-type ActivitySubscriber = (event: ActivityEvent) => void;
-
-interface ActivityStreamState {
-  subscribers: Set<ActivitySubscriber>;
-}
-
-const globalActivityStream = globalThis as typeof globalThis & {
-  __guildpassActivityStream?: ActivityStreamState;
-};
-
-const streamState =
-  globalActivityStream.__guildpassActivityStream ??
-  (globalActivityStream.__guildpassActivityStream = {
-    subscribers: new Set<ActivitySubscriber>(),
-  });
-
+/**
+ * Publish an activity event to all connected SSE clients.
+ *
+ * In mock mode, this dispatches in-process (same behavior as before).
+ * In durable mode, this also broadcasts via Postgres LISTEN/NOTIFY so
+ * that other dashboard instances receive the event.
+ */
 export function publishActivityEvent(event: ActivityEvent): void {
-  for (const subscriber of streamState.subscribers) {
-    try {
-      subscriber(event);
-    } catch (error) {
-      console.error("Activity stream subscriber failed:", error);
-    }
-  }
+  getActivityPubSub().publish(event);
 }
 
+/**
+ * Subscribe to activity events. Returns an unsubscribe function.
+ *
+ * In durable mode, this also ensures the Postgres LISTEN channel
+ * is active so cross-instance notifications are received.
+ */
 export function subscribeToActivityEvents(
-  subscriber: ActivitySubscriber
+  subscriber: ActivitySubscriber,
 ): () => void {
-  streamState.subscribers.add(subscriber);
-  return () => {
-    streamState.subscribers.delete(subscriber);
-  };
+  return getActivityPubSub().subscribe(subscriber);
 }
 
 export function encodeActivityEvent(event: ActivityEvent): string {
@@ -40,5 +29,5 @@ export function encodeActivityEvent(event: ActivityEvent): string {
 }
 
 export function getActivitySubscriberCount(): number {
-  return streamState.subscribers.size;
+  return getActivityPubSub().subscriberCount();
 }

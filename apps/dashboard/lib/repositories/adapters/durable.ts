@@ -1,4 +1,17 @@
 import crypto from "crypto";
+
+/**
+ * Generate a unique event ID using crypto.randomUUID (available in Node 18+).
+ * Falls back to Math.random-based ID if unavailable.
+ */
+function generateEventId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+}
+
 /**
  * Durable repository adapters for production deployments.
  * Backed by PostgreSQL with fallback to in-memory mock storage if the connection string is "mock://conn".
@@ -25,7 +38,11 @@ import type { ActivityEvent } from "@/lib/activity/types";
 import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import type { DashboardSettings } from "../../settings";
 import { DEFAULT_SETTINGS } from "../../settings";
-import { validateSettingsPatch, type FieldError, type SettingsPatchPayload } from "@/lib/validation/settings";
+import {
+  validateSettingsPatch,
+  type FieldError,
+  type SettingsPatchPayload,
+} from "@/lib/validation/settings";
 import { computeDiff } from "@/lib/activity/diff";
 import { ConflictError } from "@/lib/api-errors";
 import { query, withTransaction } from "../../db";
@@ -129,7 +146,10 @@ function rowToPass(row: any): Pass {
     price: row.price !== null ? Number(row.price) : undefined,
     maxSupply: row.max_supply !== null ? Number(row.max_supply) : null,
     currentSupply: Number(row.current_supply),
-    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
   };
 }
 
@@ -140,7 +160,10 @@ function rowToGuild(row: any): Guild {
     description: row.description,
     memberCount: Number(row.member_count),
     passCount: Number(row.pass_count),
-    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
   };
 }
 
@@ -152,8 +175,14 @@ function rowToMember(row: any): Member {
     name: row.name,
     status: row.status,
     roles: Array.isArray(row.roles) ? row.roles : [],
-    joinedAt: row.joined_at instanceof Date ? row.joined_at.toISOString() : String(row.joined_at),
-    lastActive: row.last_active instanceof Date ? row.last_active.toISOString() : String(row.last_active),
+    joinedAt:
+      row.joined_at instanceof Date
+        ? row.joined_at.toISOString()
+        : String(row.joined_at),
+    lastActive:
+      row.last_active instanceof Date
+        ? row.last_active.toISOString()
+        : String(row.last_active),
     version: Number(row.version),
   };
 }
@@ -165,11 +194,19 @@ function rowToActivityEvent(row: any): ActivityEvent {
     source: row.source,
     severity: row.severity,
     actor: typeof row.actor === "string" ? JSON.parse(row.actor) : row.actor,
-    timestamp: row.timestamp instanceof Date ? row.timestamp.toISOString() : String(row.timestamp),
+    timestamp:
+      row.timestamp instanceof Date
+        ? row.timestamp.toISOString()
+        : String(row.timestamp),
     description: row.description,
-    entity: typeof row.entity === "string" ? JSON.parse(row.entity) : row.entity,
-    metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
-    changes: typeof row.changes === "string" ? JSON.parse(row.changes) : row.changes,
+    entity:
+      typeof row.entity === "string" ? JSON.parse(row.entity) : row.entity,
+    metadata:
+      typeof row.metadata === "string"
+        ? JSON.parse(row.metadata)
+        : row.metadata,
+    changes:
+      typeof row.changes === "string" ? JSON.parse(row.changes) : row.changes,
     schemaVersion: Number(row.schema_version),
   };
 }
@@ -192,19 +229,30 @@ function rowToSettings(row: any): DashboardSettings {
 
 // ── Pass Repository ─────────────────────────────────────────────────────────
 
-export class DurablePassRepository extends DurableRepository implements IPassRepository {
+export class DurablePassRepository
+  extends DurableRepository
+  implements IPassRepository
+{
   private passes: Map<string, Pass> = new Map();
   private nextId = 1;
 
   async getAll(guildId: string): Promise<Pass[]> {
     if (this.isMock) {
-      return Array.from(this.passes.values()).filter((p) => p.guildId === guildId);
+      return Array.from(this.passes.values()).filter(
+        (p) => p.guildId === guildId,
+      );
     }
-    const result = await query("SELECT * FROM passes WHERE guild_id = $1 ORDER BY created_at DESC", [guildId]);
+    const result = await query(
+      "SELECT * FROM passes WHERE guild_id = $1 ORDER BY created_at DESC",
+      [guildId],
+    );
     return result.rows.map(rowToPass);
   }
 
-  async query(guildId: string, options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
+  async query(
+    guildId: string,
+    options: PassListQuery = {},
+  ): Promise<PaginatedResult<Pass>> {
     if (this.isMock) {
       const { filterPasses, paginateItems } = await import("@/lib/pagination");
       const filtered = filterPasses(await this.getAll(guildId), options);
@@ -216,7 +264,9 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
     let paramIdx = 2;
 
     if (options.search) {
-      conditions.push(`(name ILIKE $${paramIdx} OR description ILIKE $${paramIdx})`);
+      conditions.push(
+        `(name ILIKE $${paramIdx} OR description ILIKE $${paramIdx})`,
+      );
       params.push(`%${options.search}%`);
       paramIdx++;
     }
@@ -228,7 +278,10 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
     }
 
     const where = conditions.join(" AND ");
-    const countResult = await query(`SELECT COUNT(*)::integer as count FROM passes WHERE ${where}`, params);
+    const countResult = await query(
+      `SELECT COUNT(*)::integer as count FROM passes WHERE ${where}`,
+      params,
+    );
     const total = countResult.rows[0].count;
 
     const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
@@ -236,8 +289,10 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
     const offset = (page - 1) * limit;
 
     const dataResult = await query(
-      `SELECT * FROM passes WHERE ${where} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
-      [...params, limit, offset]
+      `SELECT * FROM passes WHERE ${where} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${
+        paramIdx + 1
+      }`,
+      [...params, limit, offset],
     );
 
     const hasNextPage = offset + limit < total;
@@ -258,7 +313,10 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
       const pass = this.passes.get(id);
       return pass && pass.guildId === guildId ? pass : null;
     }
-    const result = await query("SELECT * FROM passes WHERE guild_id = $1 AND id = $2", [guildId, id]);
+    const result = await query(
+      "SELECT * FROM passes WHERE guild_id = $1 AND id = $2",
+      [guildId, id],
+    );
     return result.rows.length > 0 ? rowToPass(result.rows[0]) : null;
   }
 
@@ -274,7 +332,15 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
         createdAt: new Date().toISOString(),
       };
       this.passes.set(id, newPass);
-      await this.recordDiff({}, newPass, "pass.created", `New pass created: ${newPass.name}`, "pass", id, newPass.name);
+      await this.recordDiff(
+        {},
+        newPass,
+        "pass.created",
+        `New pass created: ${newPass.name}`,
+        "pass",
+        id,
+        newPass.name,
+      );
       return newPass;
     }
 
@@ -290,26 +356,54 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
           pass.price !== undefined ? pass.price : null,
           pass.maxSupply !== undefined ? pass.maxSupply : null,
           pass.currentSupply ?? 0,
-        ]
+        ],
       );
       const created = rowToPass(result.rows[0]);
-      await this.recordDiff({}, created, "pass.created", `New pass created: ${created.name}`, "pass", created.id, created.name);
+      await this.recordDiff(
+        {},
+        created,
+        "pass.created",
+        `New pass created: ${created.name}`,
+        "pass",
+        created.id,
+        created.name,
+      );
       return created;
     });
   }
 
-  async update(guildId: string, id: string, pass: PassUpdateData): Promise<Pass | null> {
+  async update(
+    guildId: string,
+    id: string,
+    pass: PassUpdateData,
+  ): Promise<Pass | null> {
     if (this.isMock) {
       const existing = await this.getById(guildId, id);
       if (!existing) return null;
-      const updated: Pass = { ...existing, ...pass, id, guildId: existing.guildId };
+      const updated: Pass = {
+        ...existing,
+        ...pass,
+        id,
+        guildId: existing.guildId,
+      };
       this.passes.set(id, updated);
-      await this.recordDiff(existing, updated, "pass.updated", `Pass updated: ${updated.name}`, "pass", id, updated.name);
+      await this.recordDiff(
+        existing,
+        updated,
+        "pass.updated",
+        `Pass updated: ${updated.name}`,
+        "pass",
+        id,
+        updated.name,
+      );
       return updated;
     }
 
     return withTransaction(async (client) => {
-      const existingResult = await client.query("SELECT * FROM passes WHERE guild_id = $1 AND id = $2 FOR UPDATE", [guildId, id]);
+      const existingResult = await client.query(
+        "SELECT * FROM passes WHERE guild_id = $1 AND id = $2 FOR UPDATE",
+        [guildId, id],
+      );
       if (existingResult.rows.length === 0) return null;
       const old = rowToPass(existingResult.rows[0]);
 
@@ -337,11 +431,21 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
       if (setClauses.length === 0) return old;
 
       const updateResult = await client.query(
-        `UPDATE passes SET ${setClauses.join(", ")} WHERE guild_id = $1 AND id = $2 RETURNING *`,
-        [guildId, id, ...setParams]
+        `UPDATE passes SET ${setClauses.join(
+          ", ",
+        )} WHERE guild_id = $1 AND id = $2 RETURNING *`,
+        [guildId, id, ...setParams],
       );
       const updated = rowToPass(updateResult.rows[0]);
-      await this.recordDiff(old, updated, "pass.updated", `Pass updated: ${updated.name}`, "pass", id, updated.name);
+      await this.recordDiff(
+        old,
+        updated,
+        "pass.updated",
+        `Pass updated: ${updated.name}`,
+        "pass",
+        id,
+        updated.name,
+      );
       return updated;
     });
   }
@@ -351,17 +455,39 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
       const existing = await this.getById(guildId, id);
       if (!existing) return false;
       this.passes.delete(id);
-      await this.recordDiff(existing, {}, "pass.deleted", `Pass deleted: ${existing.name}`, "pass", id, existing.name);
+      await this.recordDiff(
+        existing,
+        {},
+        "pass.deleted",
+        `Pass deleted: ${existing.name}`,
+        "pass",
+        id,
+        existing.name,
+      );
       return true;
     }
 
     return withTransaction(async (client) => {
-      const existingResult = await client.query("SELECT * FROM passes WHERE guild_id = $1 AND id = $2", [guildId, id]);
+      const existingResult = await client.query(
+        "SELECT * FROM passes WHERE guild_id = $1 AND id = $2",
+        [guildId, id],
+      );
       if (existingResult.rows.length === 0) return false;
       const old = rowToPass(existingResult.rows[0]);
 
-      await client.query("DELETE FROM passes WHERE guild_id = $1 AND id = $2", [guildId, id]);
-      await this.recordDiff(old, {}, "pass.deleted", `Pass deleted: ${old.name}`, "pass", id, old.name);
+      await client.query("DELETE FROM passes WHERE guild_id = $1 AND id = $2", [
+        guildId,
+        id,
+      ]);
+      await this.recordDiff(
+        old,
+        {},
+        "pass.deleted",
+        `Pass deleted: ${old.name}`,
+        "pass",
+        id,
+        old.name,
+      );
       return true;
     });
   }
@@ -369,7 +495,10 @@ export class DurablePassRepository extends DurableRepository implements IPassRep
 
 // ── Guild Repository ────────────────────────────────────────────────────────
 
-export class DurableGuildRepository extends DurableRepository implements IGuildRepository {
+export class DurableGuildRepository
+  extends DurableRepository
+  implements IGuildRepository
+{
   private guilds: Map<string, Guild> = new Map();
   private nextId = 1;
   private readonly writeLock = new AsyncMutex();
@@ -379,7 +508,11 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
   constructor(
     connectionString: string,
     activityRepo?: IActivityRepository,
-    deps?: { memberRepo?: IMemberRepository; passRepo?: IPassRepository; seed?: Guild[] },
+    deps?: {
+      memberRepo?: IMemberRepository;
+      passRepo?: IPassRepository;
+      seed?: Guild[];
+    },
   ) {
     super(connectionString, activityRepo);
     this.memberRepo = deps?.memberRepo;
@@ -392,8 +525,12 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
 
   private async withDerivedCounts(guild: Guild): Promise<Guild> {
     const [memberCount, passCount] = await Promise.all([
-      this.memberRepo ? this.memberRepo.getAll(guild.id).then((m) => m.length) : Promise.resolve(guild.memberCount),
-      this.passRepo ? this.passRepo.getAll(guild.id).then((p) => p.length) : Promise.resolve(guild.passCount),
+      this.memberRepo
+        ? this.memberRepo.getAll(guild.id).then((m) => m.length)
+        : Promise.resolve(guild.memberCount),
+      this.passRepo
+        ? this.passRepo.getAll(guild.id).then((p) => p.length)
+        : Promise.resolve(guild.passCount),
     ]);
     return { ...guild, memberCount, passCount };
   }
@@ -411,7 +548,7 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
        FROM guilds g
        LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM members GROUP BY guild_id) mc ON mc.guild_id = g.id
        LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM passes GROUP BY guild_id) pc ON pc.guild_id = g.id
-       ORDER BY g.created_at DESC`
+       ORDER BY g.created_at DESC`,
     );
     return result.rows.map(rowToGuild);
   }
@@ -431,7 +568,7 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
        LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM members WHERE guild_id = $1 GROUP BY guild_id) mc ON mc.guild_id = g.id
        LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM passes WHERE guild_id = $1 GROUP BY guild_id) pc ON pc.guild_id = g.id
        WHERE g.id = $1`,
-      [id]
+      [id],
     );
     return result.rows.length > 0 ? rowToGuild(result.rows[0]) : null;
   }
@@ -440,9 +577,21 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
     if (this.isMock) {
       return this.writeLock.runExclusive(async () => {
         const id = String(this.nextId++);
-        const newGuild: Guild = { ...guild, id, createdAt: new Date().toISOString() };
+        const newGuild: Guild = {
+          ...guild,
+          id,
+          createdAt: new Date().toISOString(),
+        };
         this.guilds.set(id, newGuild);
-        await this.recordDiff({}, newGuild, "guild.created", `New guild created: ${newGuild.name}`, "guild", id, newGuild.name);
+        await this.recordDiff(
+          {},
+          newGuild,
+          "guild.created",
+          `New guild created: ${newGuild.name}`,
+          "guild",
+          id,
+          newGuild.name,
+        );
         return this.withDerivedCounts(newGuild);
       });
     }
@@ -450,10 +599,18 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
     return this.writeLock.runExclusive(async () => {
       const result = await query(
         `INSERT INTO guilds (name, description, member_count, pass_count) VALUES ($1, $2, $3, $4) RETURNING *`,
-        [guild.name, guild.description, guild.memberCount, guild.passCount]
+        [guild.name, guild.description, guild.memberCount, guild.passCount],
       );
       const created = rowToGuild(result.rows[0]);
-      await this.recordDiff({}, created, "guild.created", `New guild created: ${created.name}`, "guild", created.id, created.name);
+      await this.recordDiff(
+        {},
+        created,
+        "guild.created",
+        `New guild created: ${created.name}`,
+        "guild",
+        created.id,
+        created.name,
+      );
       return created;
     });
   }
@@ -468,7 +625,15 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
         delete patch.passCount;
         const updated = { ...existing, ...patch, id };
         this.guilds.set(id, updated);
-        await this.recordDiff(existing, updated, "guild.updated", `Guild updated: ${updated.name}`, "guild", id, updated.name);
+        await this.recordDiff(
+          existing,
+          updated,
+          "guild.updated",
+          `Guild updated: ${updated.name}`,
+          "guild",
+          id,
+          updated.name,
+        );
         return this.withDerivedCounts(updated);
       });
     }
@@ -495,12 +660,23 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
       }
 
       if (setClauses.length > 0) {
-        await query(`UPDATE guilds SET ${setClauses.join(", ")} WHERE id = $1`, [id, ...setParams]);
+        await query(
+          `UPDATE guilds SET ${setClauses.join(", ")} WHERE id = $1`,
+          [id, ...setParams],
+        );
       }
 
       const updated = await this.getById(id);
       if (!updated) return null;
-      await this.recordDiff(existing, updated, "guild.updated", `Guild updated: ${updated.name}`, "guild", id, updated.name);
+      await this.recordDiff(
+        existing,
+        updated,
+        "guild.updated",
+        `Guild updated: ${updated.name}`,
+        "guild",
+        id,
+        updated.name,
+      );
       return updated;
     });
   }
@@ -511,7 +687,15 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
         const existing = this.guilds.get(id);
         if (!existing) return false;
         this.guilds.delete(id);
-        await this.recordDiff(existing, {}, "guild.deleted", `Guild deleted: ${existing.name}`, "guild", id, existing.name);
+        await this.recordDiff(
+          existing,
+          {},
+          "guild.deleted",
+          `Guild deleted: ${existing.name}`,
+          "guild",
+          id,
+          existing.name,
+        );
         return true;
       });
     }
@@ -521,7 +705,15 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
       if (!existing) return false;
 
       await query("DELETE FROM guilds WHERE id = $1", [id]);
-      await this.recordDiff(existing, {}, "guild.deleted", `Guild deleted: ${existing.name}`, "guild", id, existing.name);
+      await this.recordDiff(
+        existing,
+        {},
+        "guild.deleted",
+        `Guild deleted: ${existing.name}`,
+        "guild",
+        id,
+        existing.name,
+      );
       return true;
     });
   }
@@ -529,7 +721,10 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
 
 // ── Member Repository ───────────────────────────────────────────────────────
 
-export class DurableMemberRepository extends DurableRepository implements IMemberRepository {
+export class DurableMemberRepository
+  extends DurableRepository
+  implements IMemberRepository
+{
   private members: Map<string, Member> = new Map();
   private walletIndex: Map<string, string> = new Map();
   private nextId = 1;
@@ -561,13 +756,21 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
 
   async getAll(guildId: string): Promise<Member[]> {
     if (this.isMock) {
-      return Array.from(this.members.values()).filter((m) => m.guildId === guildId);
+      return Array.from(this.members.values()).filter(
+        (m) => m.guildId === guildId,
+      );
     }
-    const result = await query("SELECT * FROM members WHERE guild_id = $1 ORDER BY joined_at DESC", [guildId]);
+    const result = await query(
+      "SELECT * FROM members WHERE guild_id = $1 ORDER BY joined_at DESC",
+      [guildId],
+    );
     return result.rows.map(rowToMember);
   }
 
-  async query(guildId: string, options: MemberListQuery = {}): Promise<PaginatedResult<Member>> {
+  async query(
+    guildId: string,
+    options: MemberListQuery = {},
+  ): Promise<PaginatedResult<Member>> {
     if (this.isMock) {
       const { filterMembers, paginateItems } = await import("@/lib/pagination");
       const filtered = filterMembers(await this.getAll(guildId), options);
@@ -597,7 +800,10 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
     }
 
     const where = conditions.join(" AND ");
-    const countResult = await query(`SELECT COUNT(*)::integer as count FROM members WHERE ${where}`, params);
+    const countResult = await query(
+      `SELECT COUNT(*)::integer as count FROM members WHERE ${where}`,
+      params,
+    );
     const total = countResult.rows[0].count;
 
     const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
@@ -605,8 +811,10 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
     const offset = (page - 1) * limit;
 
     const dataResult = await query(
-      `SELECT * FROM members WHERE ${where} ORDER BY joined_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
-      [...params, limit, offset]
+      `SELECT * FROM members WHERE ${where} ORDER BY joined_at DESC LIMIT $${paramIdx} OFFSET $${
+        paramIdx + 1
+      }`,
+      [...params, limit, offset],
     );
 
     const hasNextPage = offset + limit < total;
@@ -626,7 +834,10 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
     if (this.isMock) {
       return this.getScoped(guildId, id);
     }
-    const result = await query("SELECT * FROM members WHERE guild_id = $1 AND id = $2", [guildId, id]);
+    const result = await query(
+      "SELECT * FROM members WHERE guild_id = $1 AND id = $2",
+      [guildId, id],
+    );
     return result.rows.length > 0 ? rowToMember(result.rows[0]) : null;
   }
 
@@ -635,7 +846,10 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
       const id = this.walletIndex.get(this.walletKey(guildId, wallet));
       return id ? this.getScoped(guildId, id) : null;
     }
-    const result = await query("SELECT * FROM members WHERE guild_id = $1 AND wallet = $2", [guildId, wallet]);
+    const result = await query(
+      "SELECT * FROM members WHERE guild_id = $1 AND wallet = $2",
+      [guildId, wallet],
+    );
     return result.rows.length > 0 ? rowToMember(result.rows[0]) : null;
   }
 
@@ -656,7 +870,15 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
         };
         this.members.set(id, newMember);
         this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
-        await this.recordDiff({}, newMember, "member.joined", `${newMember.name} joined`, "member", id, newMember.name);
+        await this.recordDiff(
+          {},
+          newMember,
+          "member.joined",
+          `${newMember.name} joined`,
+          "member",
+          id,
+          newMember.name,
+        );
         return newMember;
       });
     }
@@ -674,10 +896,18 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
           JSON.stringify(member.roles ?? []),
           member.joinedAt ?? now,
           member.lastActive ?? now,
-        ]
+        ],
       );
       const created = rowToMember(result.rows[0]);
-      await this.recordDiff({}, created, "member.joined", `${created.name} joined`, "member", created.id, created.name);
+      await this.recordDiff(
+        {},
+        created,
+        "member.joined",
+        `${created.name} joined`,
+        "member",
+        created.id,
+        created.name,
+      );
       return created;
     });
   }
@@ -693,8 +923,13 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
         const existing = this.getScoped(guildId, id);
         if (!existing) return null;
 
-        if (expectedVersion !== undefined && existing.version !== expectedVersion) {
-          throw new ConflictError("This member was updated elsewhere — refresh and retry.");
+        if (
+          expectedVersion !== undefined &&
+          existing.version !== expectedVersion
+        ) {
+          throw new ConflictError(
+            "This member was updated elsewhere — refresh and retry.",
+          );
         }
 
         const updated: Member = {
@@ -706,15 +941,24 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
         };
         this.members.set(id, updated);
         if (member.wallet && member.wallet !== existing.wallet) {
-          this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
-          this.walletIndex.set(this.walletKey(existing.guildId, member.wallet), id);
+          this.walletIndex.delete(
+            this.walletKey(existing.guildId, existing.wallet),
+          );
+          this.walletIndex.set(
+            this.walletKey(existing.guildId, member.wallet),
+            id,
+          );
         }
 
         const changes = computeDiff(existing, updated);
         if (changes.length > 0 && this.activityRepo) {
           const hasRoleChange = changes.some((c) => c.field === "roles");
-          const eventType: ActivityEvent["type"] = hasRoleChange ? "member.roles_changed" : "member.left";
-          const desc = hasRoleChange ? `${updated.name}'s roles changed` : `Member ${updated.name} updated`;
+          const eventType: ActivityEvent["type"] = hasRoleChange
+            ? "member.roles_changed"
+            : "member.left";
+          const desc = hasRoleChange
+            ? `${updated.name}'s roles changed`
+            : `Member ${updated.name} updated`;
           await this.activityRepo.append({
             type: eventType,
             source: "dashboard",
@@ -733,15 +977,24 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
       const existing = await this.getById(guildId, id);
       if (!existing) return null;
 
-      if (expectedVersion !== undefined && existing.version !== expectedVersion) {
-        throw new ConflictError("This member was updated elsewhere — refresh and retry.");
+      if (
+        expectedVersion !== undefined &&
+        existing.version !== expectedVersion
+      ) {
+        throw new ConflictError(
+          "This member was updated elsewhere — refresh and retry.",
+        );
       }
 
       const setClauses: string[] = ["version = version + 1"];
       const setParams: any[] = [];
       let idx = 3;
 
-      const fields: Array<{ key: keyof MemberUpdateData; col: string; transform?: (v: any) => any }> = [
+      const fields: Array<{
+        key: keyof MemberUpdateData;
+        col: string;
+        transform?: (v: any) => any;
+      }> = [
         { key: "name", col: "name" },
         { key: "wallet", col: "wallet" },
         { key: "status", col: "status" },
@@ -753,22 +1006,30 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
       for (const f of fields) {
         if (member[f.key] !== undefined) {
           setClauses.push(`${f.col} = $${idx}`);
-          setParams.push(f.transform ? f.transform(member[f.key]) : member[f.key]);
+          setParams.push(
+            f.transform ? f.transform(member[f.key]) : member[f.key],
+          );
           idx++;
         }
       }
 
       const result = await query(
-        `UPDATE members SET ${setClauses.join(", ")} WHERE guild_id = $1 AND id = $2 RETURNING *`,
-        [guildId, id, ...setParams]
+        `UPDATE members SET ${setClauses.join(
+          ", ",
+        )} WHERE guild_id = $1 AND id = $2 RETURNING *`,
+        [guildId, id, ...setParams],
       );
       const updated = rowToMember(result.rows[0]);
 
       const changes = computeDiff(existing, updated);
       if (changes.length > 0 && this.activityRepo) {
         const hasRoleChange = changes.some((c) => c.field === "roles");
-        const eventType: ActivityEvent["type"] = hasRoleChange ? "member.roles_changed" : "member.left";
-        const desc = hasRoleChange ? `${updated.name}'s roles changed` : `Member ${updated.name} updated`;
+        const eventType: ActivityEvent["type"] = hasRoleChange
+          ? "member.roles_changed"
+          : "member.left";
+        const desc = hasRoleChange
+          ? `${updated.name}'s roles changed`
+          : `Member ${updated.name} updated`;
         await this.activityRepo.append({
           type: eventType,
           source: "dashboard",
@@ -789,9 +1050,19 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
       return this.writeLock.runExclusive(async () => {
         const existing = this.getScoped(guildId, id);
         if (!existing) return false;
-        this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
+        this.walletIndex.delete(
+          this.walletKey(existing.guildId, existing.wallet),
+        );
         this.members.delete(id);
-        await this.recordDiff(existing, {}, "member.left", `${existing.name} left`, "member", id, existing.name);
+        await this.recordDiff(
+          existing,
+          {},
+          "member.left",
+          `${existing.name} left`,
+          "member",
+          id,
+          existing.name,
+        );
         return true;
       });
     }
@@ -800,15 +1071,28 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
       const existing = await this.getById(guildId, id);
       if (!existing) return false;
 
-      await query("DELETE FROM members WHERE guild_id = $1 AND id = $2", [guildId, id]);
-      await this.recordDiff(existing, {}, "member.left", `${existing.name} left`, "member", id, existing.name);
+      await query("DELETE FROM members WHERE guild_id = $1 AND id = $2", [
+        guildId,
+        id,
+      ]);
+      await this.recordDiff(
+        existing,
+        {},
+        "member.left",
+        `${existing.name} left`,
+        "member",
+        id,
+        existing.name,
+      );
       return true;
     });
   }
 
   async *streamAll(guildId: string, chunkSize = 500): AsyncIterable<Member[]> {
     if (this.isMock) {
-      const members = Array.from(this.members.values()).filter((m) => m.guildId === guildId);
+      const members = Array.from(this.members.values()).filter(
+        (m) => m.guildId === guildId,
+      );
       for (let i = 0; i < members.length; i += chunkSize) {
         yield members.slice(i, i + chunkSize);
       }
@@ -817,11 +1101,10 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
 
     let offset = 0;
     while (true) {
-      const result = await query("SELECT * FROM members WHERE guild_id = $1 ORDER BY id LIMIT $2 OFFSET $3", [
-        guildId,
-        chunkSize,
-        offset,
-      ]);
+      const result = await query(
+        "SELECT * FROM members WHERE guild_id = $1 ORDER BY id LIMIT $2 OFFSET $3",
+        [guildId, chunkSize, offset],
+      );
       if (result.rows.length === 0) break;
       yield result.rows.map(rowToMember);
       if (result.rows.length < chunkSize) break;
@@ -832,19 +1115,24 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
 
 // ── Activity Repository ─────────────────────────────────────────────────────
 
-export class DurableActivityRepository extends DurableRepository implements IActivityRepository {
+export class DurableActivityRepository
+  extends DurableRepository
+  implements IActivityRepository
+{
   private events: ActivityEvent[] = [];
   private processedIds: Set<string> = new Set();
 
   async append(
-    event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>,
+    event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> &
+      Partial<Pick<ActivityEvent, "schemaVersion">>,
   ): Promise<ActivityEvent> {
     if (this.isMock) {
       const fullEvent: ActivityEvent = {
         ...event,
         id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         timestamp: new Date().toISOString(),
-        schemaVersion: event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
+        schemaVersion:
+          event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
       this.events.unshift(fullEvent);
       this.processedIds.add(fullEvent.id);
@@ -853,7 +1141,8 @@ export class DurableActivityRepository extends DurableRepository implements IAct
 
     const id = generateEventId();
     const now = new Date().toISOString();
-    const schemaVersion = event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION;
+    const schemaVersion =
+      event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION;
 
     const result = await query(
       `INSERT INTO activity_events (id, type, source, severity, actor, timestamp, description, entity, metadata, changes, schema_version)
@@ -870,14 +1159,21 @@ export class DurableActivityRepository extends DurableRepository implements IAct
         event.metadata ? JSON.stringify(event.metadata) : null,
         event.changes ? JSON.stringify(event.changes) : null,
         schemaVersion,
-      ]
+      ],
     );
 
-    await query("INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING", [id]);
+    await query(
+      "INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING",
+      [id],
+    );
     return rowToActivityEvent(result.rows[0]);
   }
 
-  async query(options?: { limit?: number; type?: ActivityEvent["type"]; since?: string }): Promise<ActivityEvent[]> {
+  async query(options?: {
+    limit?: number;
+    type?: ActivityEvent["type"];
+    since?: string;
+  }): Promise<ActivityEvent[]> {
     if (this.isMock) {
       let filtered = [...this.events];
       if (options?.type) {
@@ -885,7 +1181,9 @@ export class DurableActivityRepository extends DurableRepository implements IAct
       }
       if (options?.since) {
         const sinceTime = new Date(options.since).getTime();
-        filtered = filtered.filter((e) => new Date(e.timestamp).getTime() >= sinceTime);
+        filtered = filtered.filter(
+          (e) => new Date(e.timestamp).getTime() >= sinceTime,
+        );
       }
       if (options?.limit) {
         filtered = filtered.slice(0, options.limit);
@@ -909,11 +1207,15 @@ export class DurableActivityRepository extends DurableRepository implements IAct
       idx++;
     }
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = options?.limit ? `LIMIT $${idx}` : "";
     if (options?.limit) params.push(options.limit);
 
-    const result = await query(`SELECT * FROM activity_events ${where} ORDER BY timestamp DESC ${limit}`, params);
+    const result = await query(
+      `SELECT * FROM activity_events ${where} ORDER BY timestamp DESC ${limit}`,
+      params,
+    );
     return result.rows.map(rowToActivityEvent);
   }
 
@@ -921,7 +1223,10 @@ export class DurableActivityRepository extends DurableRepository implements IAct
     if (this.isMock) {
       return this.processedIds.has(eventId);
     }
-    const result = await query("SELECT 1 FROM processed_events WHERE event_id = $1", [eventId]);
+    const result = await query(
+      "SELECT 1 FROM processed_events WHERE event_id = $1",
+      [eventId],
+    );
     return result.rows.length > 0;
   }
 
@@ -931,14 +1236,20 @@ export class DurableActivityRepository extends DurableRepository implements IAct
       this.processedIds.add(eventId);
       return true;
     }
-    const result = await query("INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING", [eventId]);
+    const result = await query(
+      "INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING",
+      [eventId],
+    );
     return (result.rowCount ?? 0) > 0;
   }
 }
 
 // ── Settings Repository ─────────────────────────────────────────────────────
 
-export class DurableSettingsRepository extends DurableRepository implements ISettingsRepository {
+export class DurableSettingsRepository
+  extends DurableRepository
+  implements ISettingsRepository
+{
   private settings: DashboardSettings = { ...DEFAULT_SETTINGS };
   private encryptedSecrets: Map<string, string> = new Map();
   private readonly writeLock = new AsyncMutex();
@@ -947,7 +1258,10 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
     if (this.isMock) {
       const response: DashboardSettings = { ...this.settings };
       if (this.encryptedSecrets.has("webhookForwardingSecret")) {
-        response.webhookForwardingSecret = { isSet: true, maskedValue: "••••••••" };
+        response.webhookForwardingSecret = {
+          isSet: true,
+          maskedValue: "••••••••",
+        };
       }
       return response;
     }
@@ -959,7 +1273,9 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
     return rowToSettings(result.rows[0]);
   }
 
-  async update(patch: SettingsPatchPayload | Partial<DashboardSettings>): Promise<DashboardSettings> {
+  async update(
+    patch: SettingsPatchPayload | Partial<DashboardSettings>,
+  ): Promise<DashboardSettings> {
     const result = validateSettingsPatch(patch);
     if (!result.ok) {
       throw new SettingsValidationError(result.errors);
@@ -971,7 +1287,10 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
     if (this.isMock) {
       return this.writeLock.runExclusive(async () => {
         if (webhookForwardingSecret !== undefined) {
-          if (webhookForwardingSecret !== null && webhookForwardingSecret !== "") {
+          if (
+            webhookForwardingSecret !== null &&
+            webhookForwardingSecret !== ""
+          ) {
             const encrypted = this.encryptSecret(webhookForwardingSecret);
             this.encryptedSecrets.set("webhookForwardingSecret", encrypted);
           } else {
@@ -979,7 +1298,10 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
           }
         }
 
-        this.settings = { ...this.settings, ...publicPatch } as DashboardSettings;
+        this.settings = {
+          ...this.settings,
+          ...publicPatch,
+        } as DashboardSettings;
         await this.recordDiff(
           previous,
           this.settings,
@@ -987,7 +1309,7 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
           `Settings updated: ${Object.keys(result.value).join(", ")}`,
           "guild",
           "settings",
-          this.settings.workspaceName
+          this.settings.workspaceName,
         );
         return this.get();
       });
@@ -1015,7 +1337,10 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
       }
 
       if (webhookForwardingSecret !== undefined) {
-        if (webhookForwardingSecret !== null && webhookForwardingSecret !== "") {
+        if (
+          webhookForwardingSecret !== null &&
+          webhookForwardingSecret !== ""
+        ) {
           const encrypted = this.encryptSecret(webhookForwardingSecret);
           setClauses.push(`webhook_forwarding_secret = $${idx}`);
           setParams.push(encrypted);
@@ -1025,9 +1350,14 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
         }
       }
 
-      await query("INSERT INTO settings (id) VALUES ('default') ON CONFLICT DO NOTHING");
+      await query(
+        "INSERT INTO settings (id) VALUES ('default') ON CONFLICT DO NOTHING",
+      );
       if (setClauses.length > 1 || webhookForwardingSecret !== undefined) {
-        await query(`UPDATE settings SET ${setClauses.join(", ")} WHERE id = $1`, ["default", ...setParams]);
+        await query(
+          `UPDATE settings SET ${setClauses.join(", ")} WHERE id = $1`,
+          ["default", ...setParams],
+        );
       }
 
       const updated = await this.get();
@@ -1038,7 +1368,7 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
         `Settings updated: ${Object.keys(result.value).join(", ")}`,
         "guild",
         "settings",
-        updated.workspaceName
+        updated.workspaceName,
       );
       return updated;
     });
@@ -1046,7 +1376,8 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
 
   private encryptSecret(plaintext: string): string {
     const algo = "aes-256-gcm";
-    const rawKey = process.env.SETTINGS_ENCRYPTION_KEY || "default_dev_key_only";
+    const rawKey =
+      process.env.SETTINGS_ENCRYPTION_KEY || "default_dev_key_only";
     const key = crypto.createHash("sha256").update(rawKey).digest();
 
     const iv = crypto.randomBytes(12);

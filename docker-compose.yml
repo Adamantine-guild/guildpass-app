@@ -51,7 +51,7 @@ services:
     ports:
       - "3001:3001"
 
-  # ── Dashboard (Next.js web app) ─────────────────────────────────────
+  # ── Dashboard (Next.js web app) — Instance A ──────────────────────
   dashboard:
     build:
       context: .
@@ -72,6 +72,31 @@ services:
       ACTIVITY_STORAGE_DIR: /app/apps/dashboard/.guildpass-activity
     ports:
       - "3000:3000"
+
+  # ── Dashboard (Next.js web app) — Instance B (multi-instance test) ─
+  # This second instance demonstrates cross-instance pub/sub delivery.
+  # Both instances share the same Postgres backend and database.
+  # Webhooks ingested by either instance will reach SSE clients on both.
+  dashboard-2:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    container_name: guildpass-dashboard-2
+    restart: unless-stopped
+    depends_on:
+      - access-api
+    env_file:
+      - .env
+    environment:
+      DASHBOARD_API_MODE: ${DASHBOARD_API_MODE:-live}
+      DASHBOARD_STORAGE_MODE: ${DASHBOARD_STORAGE_MODE:-durable}
+      GUILD_PASS_CORE_URL: http://access-api:3001
+      DATABASE_URL: postgresql://guildpass:${POSTGRES_PASSWORD:-guildpass_dev}@postgres:5432/guildpass?schema=public
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+      ACTIVITY_STORAGE_MODE: file
+      ACTIVITY_STORAGE_DIR: /app/apps/dashboard/.guildpass-activity-2
+    ports:
+      - "3002:3000"
 
   # ── Discord Bot ─────────────────────────────────────────────────────
   discord-bot:
