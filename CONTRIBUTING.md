@@ -128,6 +128,50 @@ GUILD_PASS_CORE_API_KEY=supersecret
 
 > **Security note:** Live mode runs on the server side only (Next.js API routes). The `GUILD_PASS_CORE_API_KEY` is never exposed to the client bundle.
 
+### Mock Storage vs Durable Storage
+
+The dashboard supports two storage modes controlled by `DASHBOARD_STORAGE_MODE`:
+
+| Mode | Description |
+| ---- | ----------- |
+| **`mock`** (default) | Uses in-memory Map-based mock storage. All data is reset when the server restarts. |
+| **`durable`** | Uses database-backed persistence with PostgreSQL. Real CRUD operations persist across server restarts. |
+
+#### Setting up Durable Storage (Local PostgreSQL)
+
+To develop or test with durable mode locally:
+
+1. **Start PostgreSQL via Docker Compose:**
+   ```bash
+   docker compose up postgres -d
+   ```
+   This starts a Postgres instance exposed on port `5432` with username `guildpass` and password `guildpass_dev`.
+
+2. **Configure your environment:**
+   In your `apps/dashboard/.env.local`, set:
+   ```bash
+   DASHBOARD_STORAGE_MODE=durable
+   DATABASE_URL=postgresql://guildpass:guildpass_dev@localhost:5432/guildpass?schema=public
+   ```
+
+3. **Run database migrations:**
+   Run the SQL migration files against your local database:
+   ```bash
+   pnpm db:migrate
+   ```
+
+4. **(Optional) Seed the database:**
+   Pre-populate the Postgres database with the default mock fixture data:
+   ```bash
+   pnpm db:seed
+   ```
+
+5. **Run tests against the database:**
+   To run both mock and durable contract test suites:
+   ```bash
+   DATABASE_URL=postgresql://guildpass:guildpass_dev@localhost:5432/guildpass?schema=public pnpm test
+   ```
+
 ---
 
 ## Workspace Packages

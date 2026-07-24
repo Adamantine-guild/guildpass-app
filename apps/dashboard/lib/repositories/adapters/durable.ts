@@ -1,35 +1,9 @@
 import crypto from "crypto";
 /**
  * Durable repository adapters for production deployments.
+ * Backed by PostgreSQL with fallback to in-memory mock storage if the connection string is "mock://conn".
+ *
  * Contract: implementations must be server-side only and not expose credentials.
- *
- * NOTE: Specific backend choice (PostgreSQL, MongoDB, etc.) is implementation-specific.
- * This file provides the interface and placeholder for future backend adapters.
- *
- * ── Count-maintenance decision (issue #136) ──────────────────────────────────
- * Guild.memberCount / Guild.passCount are DERIVED AT READ, not maintained
- * incrementally. On every getAll / getById the guild record's counts are
- * recomputed from the injected member and pass repositories, which are the
- * source of truth. Rationale:
- *
- *   - Correct by construction. A denormalized counter maintained by hand can
- *     drift if any write path forgets to update it or if two concurrent
- *     create/delete operations interleave. Deriving the value on read makes
- *     drift impossible: the number is always whatever the member/pass repos
- *     actually contain.
- *   - The Member and Pass types carry a guildId foreign key (see mock-data.ts),
- *     and the member/pass repositories are tenant-scoped: a guild's counts are
- *     derived by querying each repository with that guild's scope, so counts
- *     always reflect exactly the records owned by that guild.
- *   - Tradeoff: each read pays for a getAll on members and passes. For the
- *     in-memory adapter this is an O(n) Map scan and negligible. A future SQL
- *     backend can swap this for an indexed COUNT(*) or a maintained counter
- *     without changing the public contract.
- *
- * Writes to the guild store (create / update / delete) are serialized through a
- * per-instance async mutex so concurrent mutations cannot interleave and leave a
- * guild record half-written. Because counts are derived rather than stored, the
- * mutex protects only the guild record itself, not the counters.
  */
 import type {
   IPassRepository,
@@ -44,14 +18,17 @@ import type {
   PassCreateData,
   PassListQuery,
   PassUpdateData,
+  ActivityEventInput,
 } from "../types";
 import type { Pass, Guild, Member } from "../../mock-data";
 import type { ActivityEvent } from "@/lib/activity/types";
+import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import type { DashboardSettings } from "../../settings";
 import { DEFAULT_SETTINGS } from "../../settings";
 import { validateSettingsPatch, type FieldError, type SettingsPatchPayload } from "@/lib/validation/settings";
 import { computeDiff } from "@/lib/activity/diff";
 import { ConflictError } from "@/lib/api-errors";
+import { query, withTransaction } from "../../db";
 
 /**
  * Thrown when a settings write is rejected by repository-boundary validation.
@@ -93,15 +70,17 @@ class AsyncMutex {
 
 /**
  * Base class for durable repositories.
- * Implementations should handle connection pooling, retries, and error handling.
+ * Implementations handle connection check and mock fallback check.
  */
 abstract class DurableRepository {
   protected connectionString: string;
   protected activityRepo?: IActivityRepository;
+  protected isMock: boolean;
 
   constructor(connectionString: string, activityRepo?: IActivityRepository) {
     this.connectionString = connectionString;
     this.activityRepo = activityRepo;
+    this.isMock = !connectionString || connectionString.startsWith("mock://");
     this.validateConnection();
   }
 
@@ -113,15 +92,6 @@ abstract class DurableRepository {
 
   /**
    * Compute and record a field-level audit diff after a mutation.
-   * Subclasses should call this within the same transaction as the write.
-   *
-   * @param previous Pre-mutation entity state
-   * @param next     Post-mutation entity state
-   * @param type     Activity event type to emit
-   * @param description Human-readable description
-   * @param entityType  Entity discriminator for the activity record
-   * @param entityId    Entity identifier
-   * @param entityName  Optional display name
    */
   protected async recordDiff<T extends Record<string, unknown>>(
     previous: T,
@@ -134,7 +104,7 @@ abstract class DurableRepository {
   ): Promise<void> {
     if (!this.activityRepo) return;
     const changes = computeDiff(previous, next);
-    if (changes.length === 0) return;
+    if (changes.length === 0 && Object.keys(previous).length > 0) return;
     await this.activityRepo.append({
       type,
       source: "dashboard",
@@ -142,83 +112,263 @@ abstract class DurableRepository {
       actor: { name: "Admin" },
       description,
       entity: { type: entityType, id: entityId, name: entityName },
-      changes,
+      changes: changes.length > 0 ? changes : undefined,
     });
   }
 }
 
-/**
- * Durable pass repository.
- * 
- * Backend implementations MUST:
- * - Store connection credentials securely (environment variables only)
- * - Never log sensitive data
- * - Return 404 for missing records, not errors
- * - Handle concurrent writes gracefully
- *
- * Multi-tenant isolation (see docs/multi-tenancy.md):
- * - The `passes` table MUST carry a NOT NULL `guild_id` foreign key
- * - Every statement MUST filter on it (`WHERE guild_id = $1 AND id = $2`) —
- *   never look a record up by `id` alone and compare afterwards
- * - `guild_id` is immutable: INSERT sets it from the scope parameter,
- *   UPDATE must never include it in the SET clause
- * - A scoped query that matches a record in another guild returns
- *   null/false, identical to a missing record
- * - Implementations must pass the isolation contract suites in
- *   apps/dashboard/test/repositories/contracts.ts
- */
+// ── Mapping Helpers ─────────────────────────────────────────────────────────
+
+function rowToPass(row: any): Pass {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    name: row.name,
+    description: row.description,
+    status: row.status,
+    price: row.price !== null ? Number(row.price) : undefined,
+    maxSupply: row.max_supply !== null ? Number(row.max_supply) : null,
+    currentSupply: Number(row.current_supply),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+  };
+}
+
+function rowToGuild(row: any): Guild {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    memberCount: Number(row.member_count),
+    passCount: Number(row.pass_count),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+  };
+}
+
+function rowToMember(row: any): Member {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    wallet: row.wallet,
+    name: row.name,
+    status: row.status,
+    roles: Array.isArray(row.roles) ? row.roles : [],
+    joinedAt: row.joined_at instanceof Date ? row.joined_at.toISOString() : String(row.joined_at),
+    lastActive: row.last_active instanceof Date ? row.last_active.toISOString() : String(row.last_active),
+    version: Number(row.version),
+  };
+}
+
+function rowToActivityEvent(row: any): ActivityEvent {
+  return {
+    id: row.id,
+    type: row.type,
+    source: row.source,
+    severity: row.severity,
+    actor: typeof row.actor === "string" ? JSON.parse(row.actor) : row.actor,
+    timestamp: row.timestamp instanceof Date ? row.timestamp.toISOString() : String(row.timestamp),
+    description: row.description,
+    entity: typeof row.entity === "string" ? JSON.parse(row.entity) : row.entity,
+    metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
+    changes: typeof row.changes === "string" ? JSON.parse(row.changes) : row.changes,
+    schemaVersion: Number(row.schema_version),
+  };
+}
+
+function rowToSettings(row: any): DashboardSettings {
+  const settings: DashboardSettings = {
+    workspaceName: row.workspace_name,
+    timezone: row.timezone,
+    displayName: row.display_name,
+    email: row.email,
+  };
+  if (row.webhook_forwarding_secret) {
+    settings.webhookForwardingSecret = {
+      isSet: true,
+      maskedValue: "••••••••",
+    };
+  }
+  return settings;
+}
+
+// ── Pass Repository ─────────────────────────────────────────────────────────
+
 export class DurablePassRepository extends DurableRepository implements IPassRepository {
-  async getAll(_guildId: string): Promise<Pass[]> {
-    // TODO: Implement against selected backend (SELECT ... WHERE guild_id = $1)
-    throw new Error("DurablePassRepository not yet implemented. Configure STORAGE_BACKEND in .env");
+  private passes: Map<string, Pass> = new Map();
+  private nextId = 1;
+
+  async getAll(guildId: string): Promise<Pass[]> {
+    if (this.isMock) {
+      return Array.from(this.passes.values()).filter((p) => p.guildId === guildId);
+    }
+    const result = await query("SELECT * FROM passes WHERE guild_id = $1 ORDER BY created_at DESC", [guildId]);
+    return result.rows.map(rowToPass);
   }
 
-  async query(_guildId: string, _options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
-    // Durable backends should push search/filter/pagination into indexed
-    // queries; every predicate must be ANDed with guild_id = $1.
-    throw new Error("DurablePassRepository not yet implemented. Configure STORAGE_BACKEND in .env");
+  async query(guildId: string, options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
+    if (this.isMock) {
+      const { filterPasses, paginateItems } = await import("@/lib/pagination");
+      const filtered = filterPasses(await this.getAll(guildId), options);
+      return paginateItems(filtered, options);
+    }
+
+    const conditions: string[] = ["guild_id = $1"];
+    const params: any[] = [guildId];
+    let paramIdx = 2;
+
+    if (options.search) {
+      conditions.push(`(name ILIKE $${paramIdx} OR description ILIKE $${paramIdx})`);
+      params.push(`%${options.search}%`);
+      paramIdx++;
+    }
+
+    if (options.status && options.status !== "all") {
+      conditions.push(`status = $${paramIdx}`);
+      params.push(options.status);
+      paramIdx++;
+    }
+
+    const where = conditions.join(" AND ");
+    const countResult = await query(`SELECT COUNT(*)::integer as count FROM passes WHERE ${where}`, params);
+    const total = countResult.rows[0].count;
+
+    const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
+    const page = Math.max(options.page ?? 1, 1);
+    const offset = (page - 1) * limit;
+
+    const dataResult = await query(
+      `SELECT * FROM passes WHERE ${where} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+      [...params, limit, offset]
+    );
+
+    const hasNextPage = offset + limit < total;
+
+    return {
+      items: dataResult.rows.map(rowToPass),
+      total,
+      limit,
+      page,
+      nextCursor: hasNextPage ? `page:${page + 1}` : null,
+      hasNextPage,
+      hasPreviousPage: page > 1,
+    };
   }
 
-  async getById(_guildId: string, _id: string): Promise<Pass | null> {
-    // TODO: SELECT ... WHERE guild_id = $1 AND id = $2
-    throw new Error("DurablePassRepository not yet implemented");
+  async getById(guildId: string, id: string): Promise<Pass | null> {
+    if (this.isMock) {
+      const pass = this.passes.get(id);
+      return pass && pass.guildId === guildId ? pass : null;
+    }
+    const result = await query("SELECT * FROM passes WHERE guild_id = $1 AND id = $2", [guildId, id]);
+    return result.rows.length > 0 ? rowToPass(result.rows[0]) : null;
   }
 
-  async create(_guildId: string, _pass: PassCreateData): Promise<Pass> {
-    // TODO: Implement with transaction support:
-    // 1. INSERT into passes table with guild_id from the scope parameter
-    // 2. Call this.recordDiff({}, created, "pass.created", desc, "pass", id, name)
-    throw new Error("DurablePassRepository not yet implemented");
+  async create(guildId: string, pass: PassCreateData): Promise<Pass> {
+    if (this.isMock) {
+      const id = String(this.nextId++);
+      const newPass: Pass = {
+        ...pass,
+        status: pass.status ?? "draft",
+        currentSupply: pass.currentSupply ?? 0,
+        id,
+        guildId,
+        createdAt: new Date().toISOString(),
+      };
+      this.passes.set(id, newPass);
+      await this.recordDiff({}, newPass, "pass.created", `New pass created: ${newPass.name}`, "pass", id, newPass.name);
+      return newPass;
+    }
+
+    return withTransaction(async (client) => {
+      const result = await client.query(
+        `INSERT INTO passes (guild_id, name, description, status, price, max_supply, current_supply)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [
+          guildId,
+          pass.name,
+          pass.description,
+          pass.status ?? "draft",
+          pass.price !== undefined ? pass.price : null,
+          pass.maxSupply !== undefined ? pass.maxSupply : null,
+          pass.currentSupply ?? 0,
+        ]
+      );
+      const created = rowToPass(result.rows[0]);
+      await this.recordDiff({}, created, "pass.created", `New pass created: ${created.name}`, "pass", created.id, created.name);
+      return created;
+    });
   }
 
-  async update(_guildId: string, _id: string, _pass: PassUpdateData): Promise<Pass | null> {
-    // TODO: Implement with optimistic locking or version column:
-    // 1. SELECT ... WHERE guild_id = $1 AND id = $2 FOR UPDATE (or equivalent)
-    // 2. Call this.recordDiff(existing, updated, "pass.updated", desc, "pass", id, name)
-    // 3. UPDATE (guild_id must never appear in the SET clause)
-    throw new Error("DurablePassRepository not yet implemented");
+  async update(guildId: string, id: string, pass: PassUpdateData): Promise<Pass | null> {
+    if (this.isMock) {
+      const existing = await this.getById(guildId, id);
+      if (!existing) return null;
+      const updated: Pass = { ...existing, ...pass, id, guildId: existing.guildId };
+      this.passes.set(id, updated);
+      await this.recordDiff(existing, updated, "pass.updated", `Pass updated: ${updated.name}`, "pass", id, updated.name);
+      return updated;
+    }
+
+    return withTransaction(async (client) => {
+      const existingResult = await client.query("SELECT * FROM passes WHERE guild_id = $1 AND id = $2 FOR UPDATE", [guildId, id]);
+      if (existingResult.rows.length === 0) return null;
+      const old = rowToPass(existingResult.rows[0]);
+
+      const setClauses: string[] = [];
+      const setParams: any[] = [];
+      let idx = 3;
+
+      const fields: Array<{ key: keyof PassUpdateData; col: string }> = [
+        { key: "name", col: "name" },
+        { key: "description", col: "description" },
+        { key: "status", col: "status" },
+        { key: "price", col: "price" },
+        { key: "maxSupply", col: "max_supply" },
+        { key: "currentSupply", col: "current_supply" },
+      ];
+
+      for (const f of fields) {
+        if (pass[f.key] !== undefined) {
+          setClauses.push(`${f.col} = $${idx}`);
+          setParams.push(pass[f.key] === undefined ? null : pass[f.key]);
+          idx++;
+        }
+      }
+
+      if (setClauses.length === 0) return old;
+
+      const updateResult = await client.query(
+        `UPDATE passes SET ${setClauses.join(", ")} WHERE guild_id = $1 AND id = $2 RETURNING *`,
+        [guildId, id, ...setParams]
+      );
+      const updated = rowToPass(updateResult.rows[0]);
+      await this.recordDiff(old, updated, "pass.updated", `Pass updated: ${updated.name}`, "pass", id, updated.name);
+      return updated;
+    });
   }
 
-  async delete(_guildId: string, _id: string): Promise<boolean> {
-    // TODO: Implement soft-delete pattern for audit trail
-    // (DELETE/UPDATE ... WHERE guild_id = $1 AND id = $2)
-    throw new Error("DurablePassRepository not yet implemented");
+  async delete(guildId: string, id: string): Promise<boolean> {
+    if (this.isMock) {
+      const existing = await this.getById(guildId, id);
+      if (!existing) return false;
+      this.passes.delete(id);
+      await this.recordDiff(existing, {}, "pass.deleted", `Pass deleted: ${existing.name}`, "pass", id, existing.name);
+      return true;
+    }
+
+    return withTransaction(async (client) => {
+      const existingResult = await client.query("SELECT * FROM passes WHERE guild_id = $1 AND id = $2", [guildId, id]);
+      if (existingResult.rows.length === 0) return false;
+      const old = rowToPass(existingResult.rows[0]);
+
+      await client.query("DELETE FROM passes WHERE guild_id = $1 AND id = $2", [guildId, id]);
+      await this.recordDiff(old, {}, "pass.deleted", `Pass deleted: ${old.name}`, "pass", id, old.name);
+      return true;
+    });
   }
 }
 
-/**
- * Durable guild repository.
- *
- * Implemented with a shared in-memory store and a FIFO async mutex that
- * serializes writes, so concurrent create/delete operations cannot corrupt the
- * guild record. member/pass counts are derived at read time from the injected
- * member and pass repositories (see the file header for the full rationale), so
- * they are always consistent with the underlying data and cannot drift.
- *
- * The member and pass repositories are optional constructor dependencies. When
- * they are absent, the stored count on the guild record is returned unchanged
- * (used only where a live count is unavailable).
- */
+// ── Guild Repository ────────────────────────────────────────────────────────
+
 export class DurableGuildRepository extends DurableRepository implements IGuildRepository {
   private guilds: Map<string, Guild> = new Map();
   private nextId = 1;
@@ -240,11 +390,6 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
     }
   }
 
-  /**
-   * Return a copy of `guild` with memberCount / passCount recomputed from the
-   * source-of-truth repositories. Falls back to the stored values when a repo
-   * is not wired up.
-   */
   private async withDerivedCounts(guild: Guild): Promise<Guild> {
     const [memberCount, passCount] = await Promise.all([
       this.memberRepo ? this.memberRepo.getAll(guild.id).then((m) => m.length) : Promise.resolve(guild.memberCount),
@@ -254,85 +399,136 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
   }
 
   async getAll(): Promise<Guild[]> {
-    const stored = Array.from(this.guilds.values());
-    return Promise.all(stored.map((g) => this.withDerivedCounts(g)));
+    if (this.isMock) {
+      const stored = Array.from(this.guilds.values());
+      return Promise.all(stored.map((g) => this.withDerivedCounts(g)));
+    }
+
+    const result = await query(
+      `SELECT g.*,
+              COALESCE(mc.cnt, 0) AS member_count,
+              COALESCE(pc.cnt, 0) AS pass_count
+       FROM guilds g
+       LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM members GROUP BY guild_id) mc ON mc.guild_id = g.id
+       LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM passes GROUP BY guild_id) pc ON pc.guild_id = g.id
+       ORDER BY g.created_at DESC`
+    );
+    return result.rows.map(rowToGuild);
   }
 
   async getById(id: string): Promise<Guild | null> {
-    const guild = this.guilds.get(id);
-    if (!guild) return null;
-    return this.withDerivedCounts(guild);
+    if (this.isMock) {
+      const guild = this.guilds.get(id);
+      if (!guild) return null;
+      return this.withDerivedCounts(guild);
+    }
+
+    const result = await query(
+      `SELECT g.*,
+              COALESCE(mc.cnt, 0) AS member_count,
+              COALESCE(pc.cnt, 0) AS pass_count
+       FROM guilds g
+       LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM members WHERE guild_id = $1 GROUP BY guild_id) mc ON mc.guild_id = g.id
+       LEFT JOIN (SELECT guild_id, COUNT(*) AS cnt FROM passes WHERE guild_id = $1 GROUP BY guild_id) pc ON pc.guild_id = g.id
+       WHERE g.id = $1`,
+      [id]
+    );
+    return result.rows.length > 0 ? rowToGuild(result.rows[0]) : null;
   }
 
   async create(guild: Omit<Guild, "id" | "createdAt">): Promise<Guild> {
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        const id = String(this.nextId++);
+        const newGuild: Guild = { ...guild, id, createdAt: new Date().toISOString() };
+        this.guilds.set(id, newGuild);
+        await this.recordDiff({}, newGuild, "guild.created", `New guild created: ${newGuild.name}`, "guild", id, newGuild.name);
+        return this.withDerivedCounts(newGuild);
+      });
+    }
+
     return this.writeLock.runExclusive(async () => {
-      const id = String(this.nextId++);
-      const newGuild: Guild = { ...guild, id, createdAt: new Date().toISOString() };
-      this.guilds.set(id, newGuild);
-      await this.recordDiff(
-        {} as Record<string, unknown>,
-        newGuild as unknown as Record<string, unknown>,
-        "guild.created",
-        `New guild created: ${newGuild.name}`,
-        "guild",
-        id,
-        newGuild.name,
+      const result = await query(
+        `INSERT INTO guilds (name, description, member_count, pass_count) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [guild.name, guild.description, guild.memberCount, guild.passCount]
       );
-      return this.withDerivedCounts(newGuild);
+      const created = rowToGuild(result.rows[0]);
+      await this.recordDiff({}, created, "guild.created", `New guild created: ${created.name}`, "guild", created.id, created.name);
+      return created;
     });
   }
 
   async update(id: string, guild: Partial<Guild>): Promise<Guild | null> {
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        const existing = this.guilds.get(id);
+        if (!existing) return null;
+        const patch = { ...guild };
+        delete patch.memberCount;
+        delete patch.passCount;
+        const updated = { ...existing, ...patch, id };
+        this.guilds.set(id, updated);
+        await this.recordDiff(existing, updated, "guild.updated", `Guild updated: ${updated.name}`, "guild", id, updated.name);
+        return this.withDerivedCounts(updated);
+      });
+    }
+
     return this.writeLock.runExclusive(async () => {
-      const existing = this.guilds.get(id);
+      const existing = await this.getById(id);
       if (!existing) return null;
-      // id is immutable; counts are derived, so ignore any attempt to set them.
-      const patch: Partial<Guild> = { ...guild };
-      delete patch.memberCount;
-      delete patch.passCount;
-      const updated: Guild = { ...existing, ...patch, id };
-      this.guilds.set(id, updated);
-      await this.recordDiff(
-        existing as unknown as Record<string, unknown>,
-        updated as unknown as Record<string, unknown>,
-        "guild.updated",
-        `Guild updated: ${updated.name}`,
-        "guild",
-        id,
-        updated.name,
-      );
-      return this.withDerivedCounts(updated);
+
+      const setClauses: string[] = [];
+      const setParams: any[] = [];
+      let idx = 2;
+
+      const fields: Array<{ key: keyof Guild; col: string }> = [
+        { key: "name", col: "name" },
+        { key: "description", col: "description" },
+      ];
+
+      for (const f of fields) {
+        if (guild[f.key] !== undefined) {
+          setClauses.push(`${f.col} = $${idx}`);
+          setParams.push(guild[f.key]);
+          idx++;
+        }
+      }
+
+      if (setClauses.length > 0) {
+        await query(`UPDATE guilds SET ${setClauses.join(", ")} WHERE id = $1`, [id, ...setParams]);
+      }
+
+      const updated = await this.getById(id);
+      if (!updated) return null;
+      await this.recordDiff(existing, updated, "guild.updated", `Guild updated: ${updated.name}`, "guild", id, updated.name);
+      return updated;
     });
   }
 
   async delete(id: string): Promise<boolean> {
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        const existing = this.guilds.get(id);
+        if (!existing) return false;
+        this.guilds.delete(id);
+        await this.recordDiff(existing, {}, "guild.deleted", `Guild deleted: ${existing.name}`, "guild", id, existing.name);
+        return true;
+      });
+    }
+
     return this.writeLock.runExclusive(async () => {
-      const existing = this.guilds.get(id);
-      const deleted = this.guilds.delete(id);
-      if (deleted && existing) {
-        await this.recordDiff(
-          existing as unknown as Record<string, unknown>,
-          {} as Record<string, unknown>,
-          "guild.deleted",
-          `Guild deleted: ${existing.name}`,
-          "guild",
-          id,
-          existing.name,
-        );
-      }
-      return deleted;
+      const existing = await this.getById(id);
+      if (!existing) return false;
+
+      await query("DELETE FROM guilds WHERE id = $1", [id]);
+      await this.recordDiff(existing, {}, "guild.deleted", `Guild deleted: ${existing.name}`, "guild", id, existing.name);
+      return true;
     });
   }
 }
 
-/**
- * Durable member repository.
- * 
- * Backend implementations MUST:
- * - Maintain wallet uniqueness constraint
- * - Support efficient lookups by wallet for verification flows
- * - Track member status changes for audit purposes
- */
+// ── Member Repository ───────────────────────────────────────────────────────
+
 export class DurableMemberRepository extends DurableRepository implements IMemberRepository {
   private members: Map<string, Member> = new Map();
   private walletIndex: Map<string, string> = new Map();
@@ -354,64 +550,135 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
     }
   }
 
-  /** Composite wallet-index key: wallets are unique per guild, not globally. */
   private walletKey(guildId: string, wallet: string): string {
     return `${guildId}::${wallet}`;
   }
 
-  /** Resolve a member only if it belongs to the given guild. */
   private getScoped(guildId: string, id: string): Member | null {
     const member = this.members.get(id);
     return member && member.guildId === guildId ? member : null;
   }
 
   async getAll(guildId: string): Promise<Member[]> {
-    return Array.from(this.members.values()).filter((m) => m.guildId === guildId);
+    if (this.isMock) {
+      return Array.from(this.members.values()).filter((m) => m.guildId === guildId);
+    }
+    const result = await query("SELECT * FROM members WHERE guild_id = $1 ORDER BY joined_at DESC", [guildId]);
+    return result.rows.map(rowToMember);
   }
 
   async query(guildId: string, options: MemberListQuery = {}): Promise<PaginatedResult<Member>> {
-    const { filterMembers, paginateItems } = await import("@/lib/pagination");
-    const filtered = filterMembers(await this.getAll(guildId), options);
-    return paginateItems(filtered, options);
+    if (this.isMock) {
+      const { filterMembers, paginateItems } = await import("@/lib/pagination");
+      const filtered = filterMembers(await this.getAll(guildId), options);
+      return paginateItems(filtered, options);
+    }
+
+    const conditions: string[] = ["guild_id = $1"];
+    const params: any[] = [guildId];
+    let paramIdx = 2;
+
+    if (options.search) {
+      conditions.push(`(name ILIKE $${paramIdx} OR wallet ILIKE $${paramIdx})`);
+      params.push(`%${options.search}%`);
+      paramIdx++;
+    }
+
+    if (options.status && options.status !== "all") {
+      conditions.push(`status = $${paramIdx}`);
+      params.push(options.status);
+      paramIdx++;
+    }
+
+    if (options.role && options.role !== "all") {
+      conditions.push(`roles @> $${paramIdx}::jsonb`);
+      params.push(JSON.stringify([options.role]));
+      paramIdx++;
+    }
+
+    const where = conditions.join(" AND ");
+    const countResult = await query(`SELECT COUNT(*)::integer as count FROM members WHERE ${where}`, params);
+    const total = countResult.rows[0].count;
+
+    const limit = Math.min(Math.max(options.limit ?? 10, 1), 50);
+    const page = Math.max(options.page ?? 1, 1);
+    const offset = (page - 1) * limit;
+
+    const dataResult = await query(
+      `SELECT * FROM members WHERE ${where} ORDER BY joined_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+      [...params, limit, offset]
+    );
+
+    const hasNextPage = offset + limit < total;
+
+    return {
+      items: dataResult.rows.map(rowToMember),
+      total,
+      limit,
+      page,
+      nextCursor: hasNextPage ? `page:${page + 1}` : null,
+      hasNextPage,
+      hasPreviousPage: page > 1,
+    };
   }
 
   async getById(guildId: string, id: string): Promise<Member | null> {
-    return this.getScoped(guildId, id);
+    if (this.isMock) {
+      return this.getScoped(guildId, id);
+    }
+    const result = await query("SELECT * FROM members WHERE guild_id = $1 AND id = $2", [guildId, id]);
+    return result.rows.length > 0 ? rowToMember(result.rows[0]) : null;
   }
 
   async getByWallet(guildId: string, wallet: string): Promise<Member | null> {
-    const id = this.walletIndex.get(this.walletKey(guildId, wallet));
-    return id ? this.getScoped(guildId, id) : null;
+    if (this.isMock) {
+      const id = this.walletIndex.get(this.walletKey(guildId, wallet));
+      return id ? this.getScoped(guildId, id) : null;
+    }
+    const result = await query("SELECT * FROM members WHERE guild_id = $1 AND wallet = $2", [guildId, wallet]);
+    return result.rows.length > 0 ? rowToMember(result.rows[0]) : null;
   }
 
   async create(guildId: string, member: MemberCreateData): Promise<Member> {
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        const id = String(this.nextId++);
+        const now = new Date().toISOString();
+        const newMember: Member = {
+          ...member,
+          status: member.status ?? "pending",
+          roles: member.roles ?? [],
+          joinedAt: member.joinedAt ?? now,
+          lastActive: member.lastActive ?? now,
+          id,
+          guildId,
+          version: 1,
+        };
+        this.members.set(id, newMember);
+        this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
+        await this.recordDiff({}, newMember, "member.joined", `${newMember.name} joined`, "member", id, newMember.name);
+        return newMember;
+      });
+    }
+
     return this.writeLock.runExclusive(async () => {
-      const id = String(this.nextId++);
       const now = new Date().toISOString();
-      const newMember: Member = {
-        ...member,
-        status: member.status ?? "pending",
-        roles: member.roles ?? [],
-        joinedAt: member.joinedAt ?? now,
-        lastActive: member.lastActive ?? now,
-        id,
-        guildId,
-        version: 1,
-      };
-      this.members.set(id, newMember);
-      this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
-
-      await this.recordDiff(
-        {} as Record<string, unknown>,
-        newMember as unknown as Record<string, unknown>,
-        "member.joined",
-        `${newMember.name} joined`,
-        "member",
-        id,
-        newMember.name,
+      const result = await query(
+        `INSERT INTO members (guild_id, wallet, name, status, roles, joined_at, last_active, version)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, 1) RETURNING *`,
+        [
+          guildId,
+          member.wallet,
+          member.name,
+          member.status ?? "pending",
+          JSON.stringify(member.roles ?? []),
+          member.joinedAt ?? now,
+          member.lastActive ?? now,
+        ]
       );
-
-      return newMember;
+      const created = rowToMember(result.rows[0]);
+      await this.recordDiff({}, created, "member.joined", `${created.name} joined`, "member", created.id, created.name);
+      return created;
     });
   }
 
@@ -421,51 +688,96 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
     member: MemberUpdateData,
     expectedVersion?: number,
   ): Promise<Member | null> {
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        const existing = this.getScoped(guildId, id);
+        if (!existing) return null;
+
+        if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+          throw new ConflictError("This member was updated elsewhere — refresh and retry.");
+        }
+
+        const updated: Member = {
+          ...existing,
+          ...member,
+          id,
+          guildId: existing.guildId,
+          version: existing.version + 1,
+        };
+        this.members.set(id, updated);
+        if (member.wallet && member.wallet !== existing.wallet) {
+          this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
+          this.walletIndex.set(this.walletKey(existing.guildId, member.wallet), id);
+        }
+
+        const changes = computeDiff(existing, updated);
+        if (changes.length > 0 && this.activityRepo) {
+          const hasRoleChange = changes.some((c) => c.field === "roles");
+          const eventType: ActivityEvent["type"] = hasRoleChange ? "member.roles_changed" : "member.left";
+          const desc = hasRoleChange ? `${updated.name}'s roles changed` : `Member ${updated.name} updated`;
+          await this.activityRepo.append({
+            type: eventType,
+            source: "dashboard",
+            severity: "info",
+            actor: { name: updated.name, wallet: updated.wallet },
+            description: desc,
+            entity: { type: "member", id: updated.id, name: updated.name },
+            changes,
+          });
+        }
+        return updated;
+      });
+    }
+
     return this.writeLock.runExclusive(async () => {
-      const existing = this.getScoped(guildId, id);
+      const existing = await this.getById(guildId, id);
       if (!existing) return null;
 
-      // Optimistic concurrency control: reject if version doesn't match
       if (expectedVersion !== undefined && existing.version !== expectedVersion) {
-        throw new ConflictError(
-          "This member was updated elsewhere — refresh and retry.",
-        );
+        throw new ConflictError("This member was updated elsewhere — refresh and retry.");
       }
 
-      const updated: Member = {
-        ...existing,
-        ...member,
-        id,
-        guildId: existing.guildId,
-        version: existing.version + 1,
-      };
-      this.members.set(id, updated);
-      if (member.wallet && member.wallet !== existing.wallet) {
-        this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
-        this.walletIndex.set(this.walletKey(existing.guildId, member.wallet), id);
+      const setClauses: string[] = ["version = version + 1"];
+      const setParams: any[] = [];
+      let idx = 3;
+
+      const fields: Array<{ key: keyof MemberUpdateData; col: string; transform?: (v: any) => any }> = [
+        { key: "name", col: "name" },
+        { key: "wallet", col: "wallet" },
+        { key: "status", col: "status" },
+        { key: "roles", col: "roles", transform: (v) => JSON.stringify(v) },
+        { key: "joinedAt", col: "joined_at" },
+        { key: "lastActive", col: "last_active" },
+      ];
+
+      for (const f of fields) {
+        if (member[f.key] !== undefined) {
+          setClauses.push(`${f.col} = $${idx}`);
+          setParams.push(f.transform ? f.transform(member[f.key]) : member[f.key]);
+          idx++;
+        }
       }
 
-      const changes = computeDiff(
-        existing as unknown as Record<string, unknown>,
-        updated as unknown as Record<string, unknown>,
+      const result = await query(
+        `UPDATE members SET ${setClauses.join(", ")} WHERE guild_id = $1 AND id = $2 RETURNING *`,
+        [guildId, id, ...setParams]
       );
-      if (changes.length > 0) {
+      const updated = rowToMember(result.rows[0]);
+
+      const changes = computeDiff(existing, updated);
+      if (changes.length > 0 && this.activityRepo) {
         const hasRoleChange = changes.some((c) => c.field === "roles");
-        const eventType: ActivityEvent["type"] = hasRoleChange
-          ? "member.roles_changed"
-          : "member.left";
-        const desc = hasRoleChange
-          ? `${updated.name}'s roles changed`
-          : `Member ${updated.name} updated`;
-        await this.recordDiff(
-          existing as unknown as Record<string, unknown>,
-          updated as unknown as Record<string, unknown>,
-          eventType,
-          desc,
-          "member",
-          id,
-          updated.name,
-        );
+        const eventType: ActivityEvent["type"] = hasRoleChange ? "member.roles_changed" : "member.left";
+        const desc = hasRoleChange ? `${updated.name}'s roles changed` : `Member ${updated.name} updated`;
+        await this.activityRepo.append({
+          type: eventType,
+          source: "dashboard",
+          severity: "info",
+          actor: { name: updated.name, wallet: updated.wallet },
+          description: desc,
+          entity: { type: "member", id: updated.id, name: updated.name },
+          changes,
+        });
       }
 
       return updated;
@@ -473,147 +785,268 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
   }
 
   async delete(guildId: string, id: string): Promise<boolean> {
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        const existing = this.getScoped(guildId, id);
+        if (!existing) return false;
+        this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
+        this.members.delete(id);
+        await this.recordDiff(existing, {}, "member.left", `${existing.name} left`, "member", id, existing.name);
+        return true;
+      });
+    }
+
     return this.writeLock.runExclusive(async () => {
-      const existing = this.getScoped(guildId, id);
+      const existing = await this.getById(guildId, id);
       if (!existing) return false;
-      this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
-      const deleted = this.members.delete(id);
-      if (deleted) {
-        await this.recordDiff(
-          existing as unknown as Record<string, unknown>,
-          {} as Record<string, unknown>,
-          "member.left",
-          `${existing.name} left`,
-          "member",
-          id,
-          existing.name,
-        );
-      }
-      return deleted;
+
+      await query("DELETE FROM members WHERE guild_id = $1 AND id = $2", [guildId, id]);
+      await this.recordDiff(existing, {}, "member.left", `${existing.name} left`, "member", id, existing.name);
+      return true;
     });
   }
 
   async *streamAll(guildId: string, chunkSize = 500): AsyncIterable<Member[]> {
-    const members = Array.from(this.members.values()).filter(
-      (m) => m.guildId === guildId,
-    );
+    if (this.isMock) {
+      const members = Array.from(this.members.values()).filter((m) => m.guildId === guildId);
+      for (let i = 0; i < members.length; i += chunkSize) {
+        yield members.slice(i, i + chunkSize);
+      }
+      return;
+    }
 
-    for (let i = 0; i < members.length; i += chunkSize) {
-      yield members.slice(i, i + chunkSize);
+    let offset = 0;
+    while (true) {
+      const result = await query("SELECT * FROM members WHERE guild_id = $1 ORDER BY id LIMIT $2 OFFSET $3", [
+        guildId,
+        chunkSize,
+        offset,
+      ]);
+      if (result.rows.length === 0) break;
+      yield result.rows.map(rowToMember);
+      if (result.rows.length < chunkSize) break;
+      offset += chunkSize;
     }
   }
 }
 
-/**
- * Durable activity repository.
- *
- * Backend implementations MUST:
- * - Use append-only pattern for audit integrity
- * - Guarantee idempotency via event ID uniqueness constraint
- * - Support efficient queries by type and timestamp
- * - Keep raw JSON metadata for future schema evolution
- */
+// ── Activity Repository ─────────────────────────────────────────────────────
+
 export class DurableActivityRepository extends DurableRepository implements IActivityRepository {
-  async append(_event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
-    throw new Error("DurableActivityRepository not yet implemented");
+  private events: ActivityEvent[] = [];
+  private processedIds: Set<string> = new Set();
+
+  async append(
+    event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>,
+  ): Promise<ActivityEvent> {
+    if (this.isMock) {
+      const fullEvent: ActivityEvent = {
+        ...event,
+        id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: new Date().toISOString(),
+        schemaVersion: event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
+      };
+      this.events.unshift(fullEvent);
+      this.processedIds.add(fullEvent.id);
+      return fullEvent;
+    }
+
+    const id = generateEventId();
+    const now = new Date().toISOString();
+    const schemaVersion = event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION;
+
+    const result = await query(
+      `INSERT INTO activity_events (id, type, source, severity, actor, timestamp, description, entity, metadata, changes, schema_version)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11) RETURNING *`,
+      [
+        id,
+        event.type,
+        event.source,
+        event.severity,
+        JSON.stringify(event.actor),
+        now,
+        event.description,
+        event.entity ? JSON.stringify(event.entity) : null,
+        event.metadata ? JSON.stringify(event.metadata) : null,
+        event.changes ? JSON.stringify(event.changes) : null,
+        schemaVersion,
+      ]
+    );
+
+    await query("INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING", [id]);
+    return rowToActivityEvent(result.rows[0]);
   }
-  async query(_options?: {
-    limit?: number;
-    type?: ActivityEvent["type"];
-    since?: string;
-  }): Promise<ActivityEvent[]> {
-    throw new Error("DurableActivityRepository not yet implemented");
+
+  async query(options?: { limit?: number; type?: ActivityEvent["type"]; since?: string }): Promise<ActivityEvent[]> {
+    if (this.isMock) {
+      let filtered = [...this.events];
+      if (options?.type) {
+        filtered = filtered.filter((e) => e.type === options.type);
+      }
+      if (options?.since) {
+        const sinceTime = new Date(options.since).getTime();
+        filtered = filtered.filter((e) => new Date(e.timestamp).getTime() >= sinceTime);
+      }
+      if (options?.limit) {
+        filtered = filtered.slice(0, options.limit);
+      }
+      return filtered;
+    }
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+
+    if (options?.type) {
+      conditions.push(`type = $${idx}`);
+      params.push(options.type);
+      idx++;
+    }
+
+    if (options?.since) {
+      conditions.push(`timestamp >= $${idx}`);
+      params.push(options.since);
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limit = options?.limit ? `LIMIT $${idx}` : "";
+    if (options?.limit) params.push(options.limit);
+
+    const result = await query(`SELECT * FROM activity_events ${where} ORDER BY timestamp DESC ${limit}`, params);
+    return result.rows.map(rowToActivityEvent);
   }
-  async hasProcessed(_eventId: string): Promise<boolean> {
-    throw new Error("DurableActivityRepository not yet implemented");
+
+  async hasProcessed(eventId: string): Promise<boolean> {
+    if (this.isMock) {
+      return this.processedIds.has(eventId);
+    }
+    const result = await query("SELECT 1 FROM processed_events WHERE event_id = $1", [eventId]);
+    return result.rows.length > 0;
   }
-  async markProcessed(_eventId: string): Promise<boolean> {
-    throw new Error("DurableActivityRepository not yet implemented");
+
+  async markProcessed(eventId: string): Promise<boolean> {
+    if (this.isMock) {
+      if (this.processedIds.has(eventId)) return false;
+      this.processedIds.add(eventId);
+      return true;
+    }
+    const result = await query("INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING", [eventId]);
+    return (result.rowCount ?? 0) > 0;
   }
 }
 
-/**
- * Durable settings repository.
- *
- * Persists the single workspace settings document in a shared in-memory store,
- * seeded from DEFAULT_SETTINGS, and serializes updates through a FIFO async
- * mutex so concurrent patches cannot interleave into a half-applied document.
- *
- * ── Repository-boundary validation (issue #139) ──────────────────────────────
- * Every update is validated with validateSettingsPatch BEFORE it touches the
- * store — the same validator the PATCH /api/settings route uses. Enforcing it
- * here, not only in the route, means any caller (a future job, a different
- * transport, a direct repository consumer) gets the same guarantees. Invalid
- * patches throw SettingsValidationError carrying field-level errors; the store
- * is left untouched. Only the validator's sanitized `value` is merged, so
- * unknown / passthrough keys from the raw input never reach the persisted
- * document.
- *
- * ── Secret-field extension point ─────────────────────────────────────────────
- * DashboardSettings holds PUBLIC settings only (see lib/settings.ts). Secret
- * values (e.g. an API key) must NOT be added to that model. When a secret is
- * introduced later it belongs in a SEPARATE, write-only store — see the
- * `writeSecret` seam below, which is intentionally left unimplemented so the
- * schema decision (public document here, secrets elsewhere and write-only) is
- * explicit rather than accidental. A production backend should back this with a
- * distinct table/column that is never returned by `get`.
- */
+// ── Settings Repository ─────────────────────────────────────────────────────
+
 export class DurableSettingsRepository extends DurableRepository implements ISettingsRepository {
   private settings: DashboardSettings = { ...DEFAULT_SETTINGS };
   private encryptedSecrets: Map<string, string> = new Map();
   private readonly writeLock = new AsyncMutex();
 
   async get(): Promise<DashboardSettings> {
-    const response: DashboardSettings = { ...this.settings };
-    if (this.encryptedSecrets.has("webhookForwardingSecret")) {
-      response.webhookForwardingSecret = { isSet: true, maskedValue: "••••••••" };
+    if (this.isMock) {
+      const response: DashboardSettings = { ...this.settings };
+      if (this.encryptedSecrets.has("webhookForwardingSecret")) {
+        response.webhookForwardingSecret = { isSet: true, maskedValue: "••••••••" };
+      }
+      return response;
     }
-    return response;
+
+    const result = await query("SELECT * FROM settings WHERE id = 'default'");
+    if (result.rows.length === 0) {
+      return { ...DEFAULT_SETTINGS };
+    }
+    return rowToSettings(result.rows[0]);
   }
 
   async update(patch: SettingsPatchPayload | Partial<DashboardSettings>): Promise<DashboardSettings> {
-    return this.writeLock.runExclusive(async () => {
-      const result = validateSettingsPatch(patch);
-      if (!result.ok) {
-        throw new SettingsValidationError(result.errors);
-      }
+    const result = validateSettingsPatch(patch);
+    if (!result.ok) {
+      throw new SettingsValidationError(result.errors);
+    }
 
-      const previous = { ...this.settings };
-      const { webhookForwardingSecret, ...publicPatch } = result.value;
+    const previous = await this.get();
+    const { webhookForwardingSecret, ...publicPatch } = result.value;
+
+    if (this.isMock) {
+      return this.writeLock.runExclusive(async () => {
+        if (webhookForwardingSecret !== undefined) {
+          if (webhookForwardingSecret !== null && webhookForwardingSecret !== "") {
+            const encrypted = this.encryptSecret(webhookForwardingSecret);
+            this.encryptedSecrets.set("webhookForwardingSecret", encrypted);
+          } else {
+            this.encryptedSecrets.delete("webhookForwardingSecret");
+          }
+        }
+
+        this.settings = { ...this.settings, ...publicPatch } as DashboardSettings;
+        await this.recordDiff(
+          previous,
+          this.settings,
+          "guild.updated",
+          `Settings updated: ${Object.keys(result.value).join(", ")}`,
+          "guild",
+          "settings",
+          this.settings.workspaceName
+        );
+        return this.get();
+      });
+    }
+
+    return this.writeLock.runExclusive(async () => {
+      const setClauses: string[] = ["updated_at = NOW()"];
+      const setParams: any[] = [];
+      let idx = 2;
+
+      const fields: Array<{ key: string; col: string }> = [
+        { key: "workspaceName", col: "workspace_name" },
+        { key: "timezone", col: "timezone" },
+        { key: "displayName", col: "display_name" },
+        { key: "email", col: "email" },
+      ];
+
+      for (const f of fields) {
+        const val = (publicPatch as any)[f.key];
+        if (val !== undefined) {
+          setClauses.push(`${f.col} = $${idx}`);
+          setParams.push(val);
+          idx++;
+        }
+      }
 
       if (webhookForwardingSecret !== undefined) {
-         if (webhookForwardingSecret !== null && webhookForwardingSecret !== "") {
-             const encrypted = this.encryptSecret(webhookForwardingSecret);
-             await this.writeSecret("webhookForwardingSecret", encrypted);
-         } else {
-             this.encryptedSecrets.delete("webhookForwardingSecret");
-         }
+        if (webhookForwardingSecret !== null && webhookForwardingSecret !== "") {
+          const encrypted = this.encryptSecret(webhookForwardingSecret);
+          setClauses.push(`webhook_forwarding_secret = $${idx}`);
+          setParams.push(encrypted);
+          idx++;
+        } else {
+          setClauses.push(`webhook_forwarding_secret = NULL`);
+        }
       }
 
-      this.settings = { ...this.settings, ...publicPatch } as DashboardSettings;
+      await query("INSERT INTO settings (id) VALUES ('default') ON CONFLICT DO NOTHING");
+      if (setClauses.length > 1 || webhookForwardingSecret !== undefined) {
+        await query(`UPDATE settings SET ${setClauses.join(", ")} WHERE id = $1`, ["default", ...setParams]);
+      }
 
+      const updated = await this.get();
       await this.recordDiff(
-        previous as unknown as Record<string, unknown>,
-        this.settings as unknown as Record<string, unknown>,
+        previous,
+        updated,
         "guild.updated",
         `Settings updated: ${Object.keys(result.value).join(", ")}`,
         "guild",
         "settings",
-        this.settings.workspaceName,
+        updated.workspaceName
       );
-
-      return this.get();
+      return updated;
     });
-  }
-
-  protected async writeSecret(key: string, value: string): Promise<void> {
-    this.encryptedSecrets.set(key, value);
   }
 
   private encryptSecret(plaintext: string): string {
     const algo = "aes-256-gcm";
     const rawKey = process.env.SETTINGS_ENCRYPTION_KEY || "default_dev_key_only";
-    // Ensure exact 32-byte derivation
     const key = crypto.createHash("sha256").update(rawKey).digest();
 
     const iv = crypto.randomBytes(12);
@@ -625,7 +1058,7 @@ export class DurableSettingsRepository extends DurableRepository implements ISet
     return JSON.stringify({
       iv: iv.toString("base64"),
       authTag,
-      ciphertext
+      ciphertext,
     });
   }
 }
