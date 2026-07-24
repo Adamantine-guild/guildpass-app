@@ -31,11 +31,29 @@
  *    deterministic event id, so a retried run never double-records.
  */
 
-import type { ActivityChange, ActivityEvent, GuildSnapshot, Membership } from "@guildpass/integration-client";
-import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
+import type {
+  ActivityChange,
+  ActivityEvent,
+  GuildSnapshot,
+  Membership,
+} from "@guildpass/integration-client";
+import {
+  CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
+  CircuitOpenError,
+  TimeoutError,
+  UpstreamError,
+} from "@guildpass/integration-client";
 import type { Guild, Member, Pass } from "../mock-data";
-import type { IGuildRepository, IMemberRepository, IPassRepository } from "../repositories/types";
-import { getGuildRepository, getMemberRepository, getPassRepository } from "../repositories/factory";
+import type {
+  IGuildRepository,
+  IMemberRepository,
+  IPassRepository,
+} from "../repositories/types";
+import {
+  getGuildRepository,
+  getMemberRepository,
+  getPassRepository,
+} from "../repositories/factory";
 import { activityStorage, type IActivityStorage } from "../activity/storage";
 import { publishActivityEvent } from "../activity/stream";
 import type {
@@ -46,7 +64,13 @@ import type {
   SnapshotClient,
 } from "./core-sync-types";
 
-export type { CoreSyncChange, CoreSyncDeps, CoreSyncMode, CoreSyncReport, SnapshotClient };
+export type {
+  CoreSyncChange,
+  CoreSyncDeps,
+  CoreSyncMode,
+  CoreSyncReport,
+  SnapshotClient,
+};
 
 /** Map core membership status to the dashboard's member vocabulary. */
 function mapMemberStatus(status: Membership["status"]): Member["status"] {
@@ -87,7 +111,58 @@ export async function reconcileGuildWithCore(options: {
   const publish = options.deps?.publish ?? publishActivityEvent;
   const now = options.deps?.now ?? (() => new Date().toISOString());
 
-  const snapshot = await client.getGuildSnapshot(guildId);
+  let snapshot: GuildSnapshot | null | undefined;
+
+  try {
+    snapshot = await client.getGuildSnapshot(guildId);
+  } catch (err: unknown) {
+    if (err instanceof CircuitOpenError) {
+      return {
+        guildId,
+        mode,
+        supported: false,
+        reason:
+          "GuildPass core is currently unreachable (circuit open). " +
+          "The circuit will allow a probe request after the cooldown period. " +
+          "Reconciliation is unavailable until the circuit closes.",
+        changes: [],
+        totals: { added: 0, updated: 0, deactivated: 0, unchanged: 0 },
+        applied: 0,
+        summary:
+          "Reconciliation unavailable: circuit breaker is open (core is failing).",
+      };
+    }
+    if (err instanceof TimeoutError) {
+      return {
+        guildId,
+        mode,
+        supported: false,
+        reason:
+          "GuildPass core timed out while fetching the guild snapshot. " +
+          "The core may be slow or overloaded. Reconciliation will be retried on the next run.",
+        changes: [],
+        totals: { added: 0, updated: 0, deactivated: 0, unchanged: 0 },
+        applied: 0,
+        summary: "Reconciliation unavailable: core timed out.",
+      };
+    }
+    if (err instanceof UpstreamError) {
+      return {
+        guildId,
+        mode,
+        supported: false,
+        reason:
+          `GuildPass core responded with status ${err.status} while fetching ` +
+          "the guild snapshot. Reconciliation cannot proceed until core recovers.",
+        changes: [],
+        totals: { added: 0, updated: 0, deactivated: 0, unchanged: 0 },
+        applied: 0,
+        summary: `Reconciliation unavailable: core returned HTTP ${err.status}.`,
+      };
+    }
+    // Re-throw unexpected errors
+    throw err;
+  }
 
   if (!snapshot) {
     return {
@@ -101,7 +176,8 @@ export async function reconcileGuildWithCore(options: {
       changes: [],
       totals: { added: 0, updated: 0, deactivated: 0, unchanged: 0 },
       applied: 0,
-      summary: "Reconciliation unavailable: core snapshot endpoint not supported.",
+      summary:
+        "Reconciliation unavailable: core snapshot endpoint not supported.",
     };
   }
 
@@ -111,7 +187,13 @@ export async function reconcileGuildWithCore(options: {
     passRepo.getAll(guildId),
   ]);
 
-  const changes = diffSnapshot(guildId, snapshot, localGuild, localMembers, localPasses);
+  const changes = diffSnapshot(
+    guildId,
+    snapshot,
+    localGuild,
+    localMembers,
+    localPasses,
+  );
 
   const totals = {
     added: changes.filter((c) => c.action === "add").length,
@@ -127,7 +209,15 @@ export async function reconcileGuildWithCore(options: {
   if (mode === "apply") {
     for (const change of changes) {
       await applyChange(guildId, change, { memberRepo, passRepo, guildRepo });
-      const recorded = await recordChange(guildId, change, snapshot, mode, sink, publish, now);
+      const recorded = await recordChange(
+        guildId,
+        change,
+        snapshot,
+        mode,
+        sink,
+        publish,
+        now,
+      );
       if (recorded) applied += 1;
     }
   }
@@ -175,7 +265,11 @@ function diffSnapshot(
         id: key,
         summary: `Add member ${sm.userId} (${sm.wallet}) — present in core, missing locally`,
         changes: [
-          { field: "status", before: undefined, after: mapMemberStatus(sm.status) },
+          {
+            field: "status",
+            before: undefined,
+            after: mapMemberStatus(sm.status),
+          },
           { field: "roles", before: undefined, after: sm.roles ?? [] },
         ],
         snapshotMember: sm,
@@ -186,17 +280,27 @@ function diffSnapshot(
     const fieldChanges: ActivityChange[] = [];
     const coreStatus = mapMemberStatus(sm.status);
     if (local.status !== coreStatus) {
-      fieldChanges.push({ field: "status", before: local.status, after: coreStatus });
+      fieldChanges.push({
+        field: "status",
+        before: local.status,
+        after: coreStatus,
+      });
     }
     if (!sameRoles(local.roles ?? [], sm.roles ?? [])) {
-      fieldChanges.push({ field: "roles", before: local.roles, after: sm.roles ?? [] });
+      fieldChanges.push({
+        field: "roles",
+        before: local.roles,
+        after: sm.roles ?? [],
+      });
     }
     if (fieldChanges.length > 0) {
       changes.push({
         entity: "member",
         action: "update",
         id: local.id,
-        summary: `Update member ${local.name} — ${fieldChanges.map((c) => c.field).join(", ")} drifted from core`,
+        summary: `Update member ${local.name} — ${fieldChanges
+          .map((c) => c.field)
+          .join(", ")} drifted from core`,
         changes: fieldChanges,
         localMember: local,
         snapshotMember: sm,
@@ -239,21 +343,45 @@ function diffSnapshot(
     }
 
     const fieldChanges: ActivityChange[] = [];
-    if (local.name !== sp.name) fieldChanges.push({ field: "name", before: local.name, after: sp.name });
-    if (local.status !== sp.status) fieldChanges.push({ field: "status", before: local.status, after: sp.status });
-    if (local.price !== sp.price) fieldChanges.push({ field: "price", before: local.price, after: sp.price });
+    if (local.name !== sp.name)
+      fieldChanges.push({ field: "name", before: local.name, after: sp.name });
+    if (local.status !== sp.status)
+      fieldChanges.push({
+        field: "status",
+        before: local.status,
+        after: sp.status,
+      });
+    if (local.price !== sp.price)
+      fieldChanges.push({
+        field: "price",
+        before: local.price,
+        after: sp.price,
+      });
     if ((local.maxSupply ?? null) !== (sp.maxSupply ?? null)) {
-      fieldChanges.push({ field: "maxSupply", before: local.maxSupply ?? null, after: sp.maxSupply ?? null });
+      fieldChanges.push({
+        field: "maxSupply",
+        before: local.maxSupply ?? null,
+        after: sp.maxSupply ?? null,
+      });
     }
-    if (sp.currentSupply !== undefined && local.currentSupply !== sp.currentSupply) {
-      fieldChanges.push({ field: "currentSupply", before: local.currentSupply, after: sp.currentSupply });
+    if (
+      sp.currentSupply !== undefined &&
+      local.currentSupply !== sp.currentSupply
+    ) {
+      fieldChanges.push({
+        field: "currentSupply",
+        before: local.currentSupply,
+        after: sp.currentSupply,
+      });
     }
     if (fieldChanges.length > 0) {
       changes.push({
         entity: "pass",
         action: "update",
         id: local.id,
-        summary: `Update pass "${local.name}" — ${fieldChanges.map((c) => c.field).join(", ")} drifted from core`,
+        summary: `Update pass "${local.name}" — ${fieldChanges
+          .map((c) => c.field)
+          .join(", ")} drifted from core`,
         changes: fieldChanges,
         localPass: local,
         snapshotPass: sp,
@@ -264,18 +392,34 @@ function diffSnapshot(
   // ── Guild metadata ──────────────────────────────────────────────────────
   if (localGuild && snapshot.guild) {
     const fieldChanges: ActivityChange[] = [];
-    if (snapshot.guild.name !== undefined && localGuild.name !== snapshot.guild.name) {
-      fieldChanges.push({ field: "name", before: localGuild.name, after: snapshot.guild.name });
+    if (
+      snapshot.guild.name !== undefined &&
+      localGuild.name !== snapshot.guild.name
+    ) {
+      fieldChanges.push({
+        field: "name",
+        before: localGuild.name,
+        after: snapshot.guild.name,
+      });
     }
-    if (snapshot.guild.description !== undefined && localGuild.description !== snapshot.guild.description) {
-      fieldChanges.push({ field: "description", before: localGuild.description, after: snapshot.guild.description });
+    if (
+      snapshot.guild.description !== undefined &&
+      localGuild.description !== snapshot.guild.description
+    ) {
+      fieldChanges.push({
+        field: "description",
+        before: localGuild.description,
+        after: snapshot.guild.description,
+      });
     }
     if (fieldChanges.length > 0) {
       changes.push({
         entity: "guild",
         action: "update",
         id: guildId,
-        summary: `Update guild — ${fieldChanges.map((c) => c.field).join(", ")} drifted from core`,
+        summary: `Update guild — ${fieldChanges
+          .map((c) => c.field)
+          .join(", ")} drifted from core`,
         changes: fieldChanges,
         snapshotGuild: snapshot.guild,
       });
@@ -307,7 +451,11 @@ async function applyChange(
         joinedAt: sm.updatedAt,
         lastActive: sm.updatedAt,
       });
-    } else if (change.action === "update" && change.localMember && change.snapshotMember) {
+    } else if (
+      change.action === "update" &&
+      change.localMember &&
+      change.snapshotMember
+    ) {
       const sm = change.snapshotMember;
       await repos.memberRepo.update(
         guildId,
@@ -354,8 +502,15 @@ async function applyChange(
 
 // ── Activity ──────────────────────────────────────────────────────────────────
 
-const ACTIVITY_TYPE: Record<CoreSyncChange["entity"], Partial<Record<CoreSyncChange["action"], ActivityEvent["type"]>>> = {
-  member: { add: "member.joined", update: "member.roles_changed", deactivate: "member.left" },
+const ACTIVITY_TYPE: Record<
+  CoreSyncChange["entity"],
+  Partial<Record<CoreSyncChange["action"], ActivityEvent["type"]>>
+> = {
+  member: {
+    add: "member.joined",
+    update: "member.roles_changed",
+    deactivate: "member.left",
+  },
   pass: { add: "pass.created", update: "pass.updated" },
   guild: { update: "guild.updated" },
 };

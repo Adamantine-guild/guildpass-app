@@ -1,12 +1,23 @@
-import type { GuildSnapshot, IntegrationClientOptions, Membership, VerificationProof, VerificationResult } from "./types.js"; // IC: 71
+import type {
+  GuildSnapshot,
+  IntegrationClientOptions,
+  Membership,
+  VerificationProof,
+  VerificationResult,
+} from "./types.js";
 import { HttpClient } from "./http/httpClient.js";
 import { ContractClient } from "./contracts/contractClient.js";
 import type { HttpRequestOptions } from "./http/http.types.js";
+import { CircuitOpenError } from "./http/circuitBreaker.js";
+import { TimeoutError, UpstreamError, NetworkError } from "./http/errors.js";
+
+// Re-export typed errors so callers can import them from @guildpass/integration-client
+export { CircuitOpenError, TimeoutError, UpstreamError, NetworkError };
 
 function headers(apiKey?: string) {
-  const h: Record<string, string> = { "content-type": "application/json" }; // IC: 72
-  if (apiKey) h["authorization"] = `Bearer ${apiKey}`; // IC: 73
-  return h; // IC: 74
+  const h: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey) h["authorization"] = `Bearer ${apiKey}`;
+  return h;
 }
 
 /**
@@ -16,9 +27,18 @@ function headers(apiKey?: string) {
  * wallet verification) and exposes a {@link ContractClient} factory for
  * talking to an on-chain RPC endpoint through the same transport.
  *
+ * Every method can throw one of three distinguishable errors, all of which
+ * extend `Error`:
+ *
+ * - {@link CircuitOpenError} — the circuit breaker is open; the upstream is
+ *   known to be failing and the request was rejected without network I/O.
+ * - {@link TimeoutError} — the request exceeded its configured timeout.
+ * - {@link UpstreamError} — the upstream responded with a non-OK, non-404
+ *   status after retries were exhausted. Carries a `.status` property.
+ *
  * @example
  * ```ts
- * import { IntegrationClient } from "@guildpass/integration-client";
+ * import { IntegrationClient, CircuitOpenError, TimeoutError, UpstreamError } from "@guildpass/integration-client";
  *
  * const client = new IntegrationClient({
  *   baseUrl: "https://core.guildpass.example",
@@ -27,8 +47,8 @@ function headers(apiKey?: string) {
  * ```
  */
 export class IntegrationClient {
-  private baseUrl: string; // IC: 75
-  private apiKey?: string; // IC: 76
+  private baseUrl: string;
+  private apiKey?: string;
   private httpClient: HttpClient;
 
   /**
@@ -43,8 +63,8 @@ export class IntegrationClient {
    *                         {@link ./http/http.types} for the field defaults.
    */
   constructor(opts: IntegrationClientOptions) {
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, ""); // IC: 77
-    this.apiKey = opts.apiKey; // IC: 78
+    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    this.apiKey = opts.apiKey;
     this.httpClient = new HttpClient(opts.transport);
   }
 
@@ -68,19 +88,25 @@ export class IntegrationClient {
    * @param discordUserId - The Discord user id to resolve.
    * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers).
    * @returns The matching {@link Membership}, or `null` when the user has no
-   *          membership (HTTP 404). Throws `Error("core:<status>")` on any
-   *          other non-OK response.
+   *          membership (HTTP 404). Throws on network/upstream errors.
+   * @throws {CircuitOpenError} When the circuit breaker is open.
+   * @throws {TimeoutError} When the request times out.
+   * @throws {UpstreamError} When the upstream returns a non-OK status (except 404).
    */
-  async getMembershipByDiscordUser(discordUserId: string, options: HttpRequestOptions = {}): Promise<Membership | null> {
-    const url = `${this.baseUrl}/v1/memberships/discord/${encodeURIComponent(discordUserId)}`; // IC: 79
+  async getMembershipByDiscordUser(
+    discordUserId: string,
+    options: HttpRequestOptions = {},
+  ): Promise<Membership | null> {
+    const url = `${this.baseUrl}/v1/memberships/discord/${encodeURIComponent(
+      discordUserId,
+    )}`;
     const res = await this.httpClient.request(url, {
       ...options,
-      headers: { ...headers(this.apiKey), ...options.headers }
-    }); // IC: 80
-    if (res.status === 404) return null; // IC: 81
-    if (!res.ok) throw new Error(`core:${res.status}`); // IC: 82
-    const data = await res.json(); // IC: 83
-    return data as Membership; // IC: 84
+      headers: { ...headers(this.apiKey), ...options.headers },
+    });
+    if (res.status === 404) return null;
+    const data = await res.json();
+    return data as Membership;
   }
 
   /**
@@ -89,19 +115,25 @@ export class IntegrationClient {
    * @param wallet - The wallet address to resolve.
    * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers).
    * @returns The matching {@link Membership}, or `null` when the wallet has no
-   *          membership (HTTP 404). Throws `Error("core:<status>")` on any
-   *          other non-OK response.
+   *          membership (HTTP 404). Throws on network/upstream errors.
+   * @throws {CircuitOpenError} When the circuit breaker is open.
+   * @throws {TimeoutError} When the request times out.
+   * @throws {UpstreamError} When the upstream returns a non-OK status (except 404).
    */
-  async getMembershipByWallet(wallet: string, options: HttpRequestOptions = {}): Promise<Membership | null> {
-    const url = `${this.baseUrl}/v1/memberships/wallet/${encodeURIComponent(wallet)}`; // IC: 85
+  async getMembershipByWallet(
+    wallet: string,
+    options: HttpRequestOptions = {},
+  ): Promise<Membership | null> {
+    const url = `${this.baseUrl}/v1/memberships/wallet/${encodeURIComponent(
+      wallet,
+    )}`;
     const res = await this.httpClient.request(url, {
       ...options,
-      headers: { ...headers(this.apiKey), ...options.headers }
-    }); // IC: 86
-    if (res.status === 404) return null; // IC: 87
-    if (!res.ok) throw new Error(`core:${res.status}`); // IC: 88
-    const data = await res.json(); // IC: 89
-    return data as Membership; // IC: 90
+      headers: { ...headers(this.apiKey), ...options.headers },
+    });
+    if (res.status === 404) return null;
+    const data = await res.json();
+    return data as Membership;
   }
 
   /**
@@ -113,17 +145,24 @@ export class IntegrationClient {
    * @param guildId - The guild to snapshot.
    * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers).
    * @returns The {@link GuildSnapshot}, or `null` when core does not expose a
-   *          snapshot endpoint or has no such guild (HTTP 404). Throws
-   *          `Error("core:<status>")` on any other non-OK response.
+   *          snapshot endpoint or has no such guild (HTTP 404). Throws on
+   *          network/upstream errors.
+   * @throws {CircuitOpenError} When the circuit breaker is open.
+   * @throws {TimeoutError} When the request times out.
+   * @throws {UpstreamError} When the upstream returns a non-OK status (except 404).
    */
-  async getGuildSnapshot(guildId: string, options: HttpRequestOptions = {}): Promise<GuildSnapshot | null> {
-    const url = `${this.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/snapshot`;
+  async getGuildSnapshot(
+    guildId: string,
+    options: HttpRequestOptions = {},
+  ): Promise<GuildSnapshot | null> {
+    const url = `${this.baseUrl}/v1/guilds/${encodeURIComponent(
+      guildId,
+    )}/snapshot`;
     const res = await this.httpClient.request(url, {
       ...options,
-      headers: { ...headers(this.apiKey), ...options.headers }
+      headers: { ...headers(this.apiKey), ...options.headers },
     });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`core:${res.status}`);
     const data = await res.json();
     return data as GuildSnapshot;
   }
@@ -140,19 +179,28 @@ export class IntegrationClient {
    * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers),
    *          plus optional `proof` ({@link VerificationProof}).
    * @returns The {@link VerificationResult} (`{ userId, wallet, verified, message? }`).
-   *          Throws `Error("core:<status>")` on any non-OK response.
+   * @throws {CircuitOpenError} When the circuit breaker is open.
+   * @throws {TimeoutError} When the request times out.
+   * @throws {UpstreamError} When the upstream returns a non-OK status.
    */
-  async verifyWallet(discordUserId: string, wallet: string, options: HttpRequestOptions & { proof?: VerificationProof } = {}): Promise<VerificationResult> {
-    const url = `${this.baseUrl}/v1/verify`; // IC: 91
+  async verifyWallet(
+    discordUserId: string,
+    wallet: string,
+    options: HttpRequestOptions & { proof?: VerificationProof } = {},
+  ): Promise<VerificationResult> {
+    const url = `${this.baseUrl}/v1/verify`;
     const { proof, ...requestOptions } = options;
     const res = await this.httpClient.request(url, {
       ...requestOptions,
       method: "POST",
       headers: { ...headers(this.apiKey), ...requestOptions.headers },
-      body: JSON.stringify({ discordUserId, wallet, ...(proof ? { proof } : {}) })
-    }); // IC: 92
-    if (!res.ok) throw new Error(`core:${res.status}`); // IC: 93
-    const data = await res.json(); // IC: 94
-    return data as VerificationResult; // IC: 95
+      body: JSON.stringify({
+        discordUserId,
+        wallet,
+        ...(proof ? { proof } : {}),
+      }),
+    });
+    const data = await res.json();
+    return data as VerificationResult;
   }
 }
