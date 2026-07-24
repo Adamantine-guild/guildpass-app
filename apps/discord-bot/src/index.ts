@@ -64,6 +64,19 @@ if (isMockMode) {
       };
     }
 
+    async issueVerificationChallenge(
+      discordUserId: string,
+      wallet: string,
+    ) {
+      console.log("[mock] issueVerificationChallenge called", discordUserId, wallet);
+      return {
+        nonce: "mocknonce1234567",
+        message: `GuildPass wallet verification\n\nDiscord user: ${discordUserId}\nWallet: ${wallet}\nNonce: mocknonce1234567`,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        expiresIn: 300,
+      };
+    }
+
     async getMembershipByDiscordUser(
       discordUserId: string,
     ): Promise<Membership | null> {

@@ -18,12 +18,24 @@ export interface GuildStats {
 // A minimal interface capturing the IntegrationClient methods used by the bot.
 // This decouples the bot from the concrete class, making testing and DI simple.
 
+export interface VerificationChallenge {
+  nonce: string;
+  message: string;
+  expiresAt: number;
+  expiresIn: number;
+}
+
 export interface BotIntegrationClient {
   verifyWallet(
     discordUserId: string,
     wallet: string,
     options?: { signal?: AbortSignal },
   ): Promise<VerificationResult>;
+  issueVerificationChallenge(
+    discordUserId: string,
+    wallet: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<VerificationChallenge>;
   getMembershipByDiscordUser(
     discordUserId: string,
     options?: { signal?: AbortSignal },
@@ -124,20 +136,24 @@ export function createClient(options: BotOptions = {}): Client {
         const wallet = interaction.options.getString("wallet", true);
         await interaction.deferReply({ ephemeral: true });
 
+        // Proof-of-control flow (issue #173): pasting an address here never
+        // proved ownership — addresses are public — so verification now
+        // requires signing a challenge with the wallet. A Discord slash
+        // command can't produce that signature, so we hand the user the
+        // message to sign instead of doing a lookup-style verify.
         try {
-          const result = await integration.verifyWallet(
+          const result = await integration.issueVerificationChallenge(
             interaction.user.id,
             wallet,
           );
-          if (result.verified) {
-            await interaction.editReply(
-              `✅ Wallet verified: \`${wallet}\``,
-            );
-          } else {
-            await interaction.editReply(
-              `❌ Verification failed: ${result.message ?? "unknown reason"}`,
-            );
-          }
+          const signHere = config.dashboardUrl
+            ? `Sign it with your wallet at ${config.dashboardUrl} (the verification form requests the challenge for you).`
+            : "Sign it with your wallet and submit the signature through the GuildPass dashboard verification form.";
+          await interaction.editReply(
+            `To prove you control \`${wallet}\`, sign this exact message with that wallet:\n` +
+              `\`\`\`\n${result.message}\n\`\`\`\n` +
+              `${signHere} The challenge expires in ${Math.floor(result.expiresIn / 60)} minutes and works once.`,
+          );
         } catch (err) {
           console.error("[bot] /verify error:", err);
           await interaction.editReply(
@@ -301,6 +317,32 @@ function createStubIntegrationClient(): BotIntegrationClient {
         verified: false,
         message: "Stub integration — no GuildPass API connected.",
       };
+    },
+    async issueVerificationChallenge(
+      discordUserId: string,
+      wallet: string,
+      options?: { signal?: AbortSignal },
+    ): Promise<VerificationChallenge> {
+      // Challenges are issued by the dashboard, not core. With no integration
+      // client wired in, call the dashboard endpoint directly when configured.
+      if (!config.dashboardUrl) {
+        throw new Error("GUILD_PASS_DASHBOARD_URL is not configured");
+      }
+      const res = await fetch(`${config.dashboardUrl}/api/verify/challenge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ discordUserId, wallet }),
+        signal: options?.signal ?? null,
+      });
+      const body = (await res.json()) as
+        | { ok: true; data: VerificationChallenge }
+        | { ok: false; error?: string };
+      if (!res.ok || !body.ok) {
+        throw new Error(
+          `dashboard challenge failed: ${res.ok && !body.ok ? body.error : res.status}`,
+        );
+      }
+      return body.data;
     },
     async getMembershipByDiscordUser(
       _discordUserId: string,
