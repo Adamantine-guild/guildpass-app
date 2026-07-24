@@ -105,6 +105,30 @@ export class IntegrationClient {
   }
 
   /**
+   * Fetch a point-in-time authoritative snapshot of a guild's state from core.
+   *
+   * GETs `/v1/guilds/:guildId/snapshot`. Used by the dashboard's
+   * reconciliation job to recover state drift after webhook delivery gaps.
+   *
+   * @param guildId - The guild to snapshot.
+   * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers).
+   * @returns The {@link GuildSnapshot}, or `null` when core does not expose a
+   *          snapshot endpoint or has no such guild (HTTP 404). Throws
+   *          `Error("core:<status>")` on any other non-OK response.
+   */
+  async getGuildSnapshot(guildId: string, options: HttpRequestOptions = {}): Promise<GuildSnapshot | null> {
+    const url = `${this.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/snapshot`;
+    const res = await this.httpClient.request(url, {
+      ...options,
+      headers: { ...headers(this.apiKey), ...options.headers }
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`core:${res.status}`);
+    const data = await res.json();
+    return data as GuildSnapshot;
+  }
+
+  /**
    * Verify that a Discord user controls a given wallet and return the result.
    *
    * POSTs `{ discordUserId, wallet }` to `/v1/verify`. When `options.proof`

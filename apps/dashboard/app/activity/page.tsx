@@ -2,6 +2,7 @@
 
 import DashboardLayout from "@/components/DashboardLayout";
 import LastUpdated from "@/components/LastUpdated";
+import WalletAddressText from "@/components/WalletAddressText";
 import { getActivityRefreshConfig } from "@/lib/env";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
@@ -70,6 +71,7 @@ const SOURCE_FILTERS: { label: string; value: ActivityEventSource | "" }[] = [
   { label: "Dashboard", value: "dashboard" },
   { label: "Webhook", value: "webhook" },
   { label: "Core API", value: "core_api" },
+  { label: "Reconciliation", value: "reconciliation" },
 ];
 
 const SEVERITY_FILTERS: { label: string; value: ActivityEventSeverity | "" }[] = [
@@ -395,7 +397,7 @@ export default function ActivityPage() {
                         >
                           {formatRelativeTime(activity.timestamp)}
                         </span>
-                        <span className={`rounded-full px-2 py-1 text-xs ${activity.source === "webhook" ? "bg-indigo-50 text-indigo-700" : "bg-slate-100 text-slate-700"}`}>
+                        <span className={`rounded-full px-2 py-1 text-xs ${activity.source === "webhook" ? "bg-indigo-50 text-indigo-700" : activity.source === "reconciliation" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700"}`}>
                           {activity.source}
                         </span>
                         <span className={`rounded-full px-2 py-1 text-xs ${activity.severity === "error" || activity.severity === "critical" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
@@ -404,7 +406,7 @@ export default function ActivityPage() {
                       </div>
                     </div>
                     <p className="mt-0.5 text-sm text-slate-500">
-                      by {activity.actor.name || activity.actor.wallet || "System"}
+                      by {activity.actor.name || (activity.actor.wallet ? <WalletAddressText address={activity.actor.wallet} /> : "System")}
                     </p>
                     {activity.entity && (
                       <p className="mt-1 text-xs text-slate-400">

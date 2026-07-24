@@ -31,6 +31,7 @@ const EVENT_SOURCES = new Set<ActivityEventSource>([
   "dashboard",
   "webhook",
   "core_api",
+  "reconciliation",
 ]);
 
 const EVENT_SEVERITIES = new Set<ActivityEventSeverity>([

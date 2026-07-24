@@ -2,6 +2,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { getServerComponentSession } from "@/lib/auth/server-session";
 import { getIntegrationsList, IntegrationStatus } from "@/lib/integrations";
 import AccessDenied from "@/components/AccessDenied";
+import ReconcilePanel from "@/components/ReconcilePanel";
 import { hasRole } from "@/lib/permissions";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 
@@ -57,6 +58,7 @@ export default async function IntegrationsPage() {
         </div>
 
         <div className="space-y-6">
+          <ReconcilePanel />
           {integrations.map((integration) => (
             <div key={integration.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
               <div className="p-6">
