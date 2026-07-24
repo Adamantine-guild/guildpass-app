@@ -1,7 +1,9 @@
 import {
   encodeActivityEvent,
+  getEventsAfterCursor,
   subscribeToActivityEvents,
 } from "@/lib/activity/stream";
+import { activityStorage } from "@/lib/activity/storage";
 import { requireSessionAndPermission } from "@/lib/auth/require-permission";
 import { getActiveGuildId } from "@/lib/guild-context";
 
@@ -17,6 +19,17 @@ const encoder = new TextEncoder();
 export async function GET(request: Request): Promise<Response> {
   const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "activity:read");
   if (!guard.ok) return guard.response;
+
+  // Reconnecting clients identify their last received event via the native
+  // Last-Event-ID header (automatic EventSource retry) or an explicit query
+  // param (manual reconnect). Snapshot before subscribing so anything
+  // published in between arrives through the live subscription instead.
+  const resumeCursor =
+    request.headers.get("Last-Event-ID") ??
+    new URL(request.url).searchParams.get("lastEventId");
+  const missedEvents = resumeCursor
+    ? getEventsAfterCursor(await activityStorage.getEvents(), resumeCursor)
+    : [];
 
   let dispose = () => {};
   const stream = new ReadableStream<Uint8Array>({
@@ -73,6 +86,9 @@ export async function GET(request: Request): Promise<Response> {
       };
 
       enqueueFrame(READY_FRAME);
+      for (const missed of missedEvents) {
+        enqueueFrame(encodeActivityEvent(missed));
+      }
       if (request.signal.aborted) {
         onAbort();
       } else {

@@ -36,7 +36,24 @@ export function subscribeToActivityEvents(
 }
 
 export function encodeActivityEvent(event: ActivityEvent): string {
-  return `event: activity\ndata: ${JSON.stringify(event)}\n\n`;
+  // The id line lets native EventSource clients track lastEventId and send
+  // Last-Event-ID on reconnect, which the stream route replays from.
+  return `id: ${event.id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+/**
+ * Returns the events newer than `cursor` (an event id), oldest first, ready
+ * to replay to a reconnecting client. Events are expected newest-first.
+ * Returns [] when the cursor is unknown (e.g. evicted from storage) — the
+ * client's REST backfill covers that case.
+ */
+export function getEventsAfterCursor(
+  events: ActivityEvent[],
+  cursor: string
+): ActivityEvent[] {
+  const cursorIndex = events.findIndex((event) => event.id === cursor);
+  if (cursorIndex <= 0) return [];
+  return events.slice(0, cursorIndex).reverse();
 }
 
 export function getActivitySubscriberCount(): number {

@@ -84,6 +84,7 @@ export function useActivityFeed({
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const seenIds = useRef(new Set<string>());
+  const latestSeenTimestamp = useRef<string | null>(null);
   const queryVersion = useRef(0);
   const requestVersion = useRef(0);
 
@@ -122,7 +123,19 @@ export function useActivityFeed({
 
   const hasFilters = Boolean(type || source || severity || entityType || actor?.trim() || from);
 
+  const noteSeenTimestamps = useCallback((incoming: ActivityEvent[]) => {
+    for (const event of incoming) {
+      if (
+        latestSeenTimestamp.current === null ||
+        new Date(event.timestamp).getTime() > new Date(latestSeenTimestamp.current).getTime()
+      ) {
+        latestSeenTimestamp.current = event.timestamp;
+      }
+    }
+  }, []);
+
   const replaceEvents = useCallback((incoming: ActivityEvent[]) => {
+    noteSeenTimestamps(incoming);
     setEvents((previous) => {
       const byId = new Map<string, ActivityEvent>(previous.map((event) => [event.id, event]));
       incoming.forEach((event) => byId.set(event.id, event));
@@ -131,9 +144,10 @@ export function useActivityFeed({
       return bounded;
     });
     setLastUpdated(new Date());
-  }, [maxEvents]);
+  }, [maxEvents, noteSeenTimestamps]);
 
   const appendEvents = useCallback((incoming: ActivityEvent[]) => {
+    noteSeenTimestamps(incoming);
     const fresh = incoming.filter((event) => !seenIds.current.has(event.id));
     if (fresh.length === 0) return;
 
@@ -146,9 +160,10 @@ export function useActivityFeed({
       return bounded;
     });
     setLastUpdated(new Date());
-  }, [maxEvents]);
+  }, [maxEvents, noteSeenTimestamps]);
 
   const prependLiveEvent = useCallback((event: ActivityEvent) => {
+    noteSeenTimestamps([event]);
     if (seenIds.current.has(event.id)) return;
     if (filterActivityEvents([event], query).events.length === 0) return;
 
@@ -163,7 +178,7 @@ export function useActivityFeed({
     setTotal((previous) => previous + 1);
     setLastUpdated(new Date());
     setError(null);
-  }, [maxEvents, query]);
+  }, [maxEvents, noteSeenTimestamps, query]);
 
   const fetchLatest = useCallback(async ({ simulateEvent = true } = {}) => {
     const version = queryVersion.current;
@@ -256,8 +271,31 @@ export function useActivityFeed({
       );
     };
 
+    // After a dropped stream reconnects, backfill anything published during
+    // the outage through the REST API before live events resume. The from
+    // filter is inclusive and appendEvents dedupes by id, so overlap with
+    // the server-side replay and the live stream is harmless.
+    const backfillMissedEvents = async () => {
+      const since = latestSeenTimestamp.current;
+      if (!since) {
+        if (!disposed) void fetchLatest({ simulateEvent: false });
+        return;
+      }
+      const version = queryVersion.current;
+      try {
+        const data = await fetchActivity({ ...query, from: since, sort: "oldest" });
+        if (disposed || version !== queryVersion.current) return;
+        appendEvents(data.events.map(toActivityEvent));
+        setTotal((previous) => Math.max(previous, data.total));
+        setError(null);
+      } catch {
+        // The polling fallback and the next reconciliation cover a failed backfill.
+      }
+    };
+
     queryVersion.current += 1;
     seenIds.current.clear();
+    latestSeenTimestamp.current = null;
     setEvents([]);
     setNextCursor(null);
     setTotal(0);
@@ -279,6 +317,9 @@ export function useActivityFeed({
           onReady: () => {
             void fetchLatest({ simulateEvent: false });
           },
+          onReconnect: () => {
+            void backfillMissedEvents();
+          },
         });
       }
     }
@@ -289,7 +330,7 @@ export function useActivityFeed({
       stopStream();
       stopPolling();
     };
-  }, [autoRefresh, cacheRevision, fallbackIntervalMs, fetchLatest, guildId, prependLiveEvent]);
+  }, [autoRefresh, cacheRevision, fallbackIntervalMs, fetchLatest, guildId, prependLiveEvent, appendEvents, query]);
 
   return {
     events,

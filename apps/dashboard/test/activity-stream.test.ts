@@ -8,9 +8,11 @@ import {
 } from "../lib/activity/client-stream";
 import {
   getActivitySubscriberCount,
+  getEventsAfterCursor,
   publishActivityEvent,
   subscribeToActivityEvents,
 } from "../lib/activity/stream";
+import { activityStorage } from "../lib/activity/storage";
 import { GET as streamActivity } from "../app/api/activity/stream/route";
 import { POST as receiveWebhook } from "../app/api/webhooks/route";
 import { scheduleActivityReconciliation } from "../lib/hooks/useActivityFeed";
@@ -75,32 +77,107 @@ describe("activity SSE delivery", () => {
     assert.equal(getActivitySubscriberCount(), initialSubscribers);
   });
 
-  test("client connector accepts activity and falls back exactly once on stream error", () => {
-    const source = new FakeEventSource();
+  test("client connector accepts activity and reconnects with backoff on stream error", async () => {
+    const sources: FakeEventSource[] = [];
     const received: string[] = [];
     let fallbackCount = 0;
     const event = makeActivityEvent({ id: "evt_client_stream_001" });
 
     const disconnect = connectActivityStream({
-      createEventSource: () => source,
+      createEventSource: () => {
+        const source = new FakeEventSource();
+        sources.push(source);
+        return source;
+      },
       onEvent: (activity) => received.push(activity.id),
       onFallback: () => {
         fallbackCount += 1;
       },
+      reconnectBaseMs: 40,
     });
 
-    source.emit("ready", "{}");
-    source.emit("activity", JSON.stringify(event));
-    source.emit("activity", "not-json");
-    source.emit("error");
-    source.emit("error");
+    sources[0].emit("ready", "{}");
+    sources[0].emit("activity", JSON.stringify(event));
+    sources[0].emit("activity", "not-json");
+    sources[0].emit("error");
+    sources[0].emit("error");
 
     assert.deepEqual(received, [event.id]);
-    assert.equal(fallbackCount, 1);
-    assert.equal(source.closeCount, 1);
+    assert.equal(fallbackCount, 0);
+    assert.equal(sources[0].closeCount, 1);
+    assert.equal(sources.length, 1, "reconnect must not happen synchronously");
+
+    await delay(120);
+    assert.equal(sources.length, 2, "reconnect should have fired once after backoff");
+    assert.equal(fallbackCount, 0);
 
     disconnect();
-    assert.equal(source.closeCount, 1);
+    assert.equal(sources[1].closeCount, 1);
+  });
+
+  test("reconnect carries the last event id and reports the cursor for backfill", async () => {
+    const urls: string[] = [];
+    const sources: FakeEventSource[] = [];
+    const cursors: Array<{ lastEventId: string | null; lastEventTimestamp: string | null }> = [];
+    const first = makeActivityEvent({ id: "evt_cursor_001" });
+
+    const disconnect = connectActivityStream({
+      createEventSource: (url) => {
+        urls.push(url);
+        const source = new FakeEventSource();
+        sources.push(source);
+        return source;
+      },
+      onEvent: () => {},
+      onFallback: () => assert.fail("stream should recover before fallback"),
+      onReconnect: (cursor) => cursors.push(cursor),
+      reconnectBaseMs: 10,
+      random: () => 0.5,
+    });
+
+    assert.equal(urls[0], "/api/activity/stream");
+    sources[0].emit("ready", "{}");
+    sources[0].emit("activity", JSON.stringify(first));
+    sources[0].emit("error");
+
+    await delay(80);
+    assert.equal(sources.length, 2);
+    assert.match(urls[1], /lastEventId=evt_cursor_001/);
+
+    sources[1].emit("ready", "{}");
+    assert.deepEqual(cursors, [
+      { lastEventId: "evt_cursor_001", lastEventTimestamp: first.timestamp },
+    ]);
+    disconnect();
+  });
+
+  test("client falls back to polling after exhausting reconnect attempts", async () => {
+    const sources: FakeEventSource[] = [];
+    let fallbackCount = 0;
+
+    const disconnect = connectActivityStream({
+      createEventSource: () => {
+        const source = new FakeEventSource();
+        sources.push(source);
+        return source;
+      },
+      onEvent: () => {},
+      onFallback: () => {
+        fallbackCount += 1;
+      },
+      maxReconnectAttempts: 2,
+      reconnectBaseMs: 10,
+      random: () => 0.5,
+    });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      sources[sources.length - 1].emit("error");
+      await delay(60);
+    }
+
+    assert.equal(sources.length, 3, "initial connect plus two reconnect attempts");
+    assert.equal(fallbackCount, 1);
+    disconnect();
   });
 
   test("ready handshake reconciles the REST snapshot after subscription", () => {
@@ -128,42 +205,104 @@ describe("activity SSE delivery", () => {
   });
 
   test("client falls back when the stream never becomes ready", async () => {
-    const source = new FakeEventSource();
+    const sources: FakeEventSource[] = [];
     let fallbackCount = 0;
 
     connectActivityStream({
       connectionTimeoutMs: 10,
-      createEventSource: () => source,
+      createEventSource: () => {
+        const source = new FakeEventSource();
+        sources.push(source);
+        return source;
+      },
       heartbeatTimeoutMs: 100,
       onEvent: () => {},
       onFallback: () => {
         fallbackCount += 1;
       },
+      maxReconnectAttempts: 1,
+      reconnectBaseMs: 10,
+      random: () => 0.5,
     });
 
-    await delay(30);
+    await delay(150);
+    assert.equal(sources.length, 2, "initial connect plus one reconnect attempt");
     assert.equal(fallbackCount, 1);
-    assert.equal(source.closeCount, 1);
+    assert.equal(sources[sources.length - 1].closeCount, 1);
   });
 
-  test("client falls back when a ready stream stops sending heartbeats", async () => {
-    const source = new FakeEventSource();
+  test("client reconnects when a ready stream stops sending heartbeats", async () => {
+    const sources: FakeEventSource[] = [];
     let fallbackCount = 0;
 
     connectActivityStream({
       connectionTimeoutMs: 100,
-      createEventSource: () => source,
-      heartbeatTimeoutMs: 10,
+      createEventSource: () => {
+        const source = new FakeEventSource();
+        sources.push(source);
+        return source;
+      },
+      heartbeatTimeoutMs: 20,
       onEvent: () => {},
       onFallback: () => {
         fallbackCount += 1;
       },
+      maxReconnectAttempts: 1,
+      reconnectBaseMs: 10,
+      random: () => 0.5,
     });
 
-    source.emit("ready", "{}");
-    await delay(30);
-    assert.equal(fallbackCount, 1);
-    assert.equal(source.closeCount, 1);
+    sources[0].emit("ready", "{}");
+    await delay(60);
+    assert.equal(fallbackCount, 0, "heartbeat loss triggers reconnect, not fallback");
+    assert.equal(sources[0].closeCount, 1);
+
+    await delay(150);
+    assert.equal(sources.length, 2);
+    assert.equal(fallbackCount, 1, "silent reconnect attempt exhausts into fallback");
+  });
+
+  test("server frames carry an id line and replay events missed since Last-Event-ID", async () => {
+    const anchor = makeActivityEvent({ id: `evt_replay_anchor_${Date.now()}` });
+    const missed = makeActivityEvent({ id: `evt_replay_missed_${Date.now()}` });
+    await activityStorage.recordActivityEvent(anchor);
+    await activityStorage.recordActivityEvent(missed);
+
+    const response = await streamActivity(
+      new Request(`https://example.test/api/activity/stream?lastEventId=${anchor.id}`)
+    );
+    assert.equal(response.status, 200);
+    assert.ok(response.body);
+
+    const reader = response.body.getReader();
+    try {
+      const decoder = new TextDecoder();
+      const ready = await readWithTimeout(reader, 500);
+      assert.match(decoder.decode(ready.value), /event: ready/);
+
+      const replay = await readWithTimeout(reader, 500);
+      const frame = decoder.decode(replay.value);
+      assert.match(frame, new RegExp(`id: ${missed.id}`));
+      assert.match(frame, /event: activity/);
+      assert.doesNotMatch(frame, new RegExp(anchor.id), "cursor event itself is not replayed");
+    } finally {
+      await reader.cancel();
+    }
+  });
+
+  test("getEventsAfterCursor returns newer events oldest-first and [] for unknown cursors", async () => {
+    const base = Date.now();
+    const oldest = makeActivityEvent({ id: `evt_cursor_a_${base}` });
+    const middle = makeActivityEvent({ id: `evt_cursor_b_${base}` });
+    const newest = makeActivityEvent({ id: `evt_cursor_c_${base}` });
+    const newestFirst = [newest, middle, oldest];
+
+    assert.deepEqual(
+      getEventsAfterCursor(newestFirst, oldest.id).map((event) => event.id),
+      [middle.id, newest.id]
+    );
+    assert.deepEqual(getEventsAfterCursor(newestFirst, newest.id), []);
+    assert.deepEqual(getEventsAfterCursor(newestFirst, "evt_not_stored"), []);
   });
 
   test("server disconnects a stream whose bounded output queue fills", async () => {
