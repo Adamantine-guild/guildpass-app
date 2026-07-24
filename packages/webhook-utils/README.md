@@ -364,6 +364,17 @@ if (!result.valid) {
 
 Webhooks should only be received over HTTPS to prevent man-in-the-middle attacks. Signature verification does not protect against network eavesdropping.
 
+### 6. Protect the Endpoint Itself
+
+Signature verification stops forged events, but the verification step itself
+costs CPU — an endpoint that verifies unbounded bodies at unbounded rates can
+still be abused. Reject oversized bodies **before** verifying, rate-limit
+sources with repeated failed verifications, and log rejections in a
+structured format (without the secret or signature values) so probing is
+visible. The dashboard's webhook route (`apps/dashboard/app/api/webhooks/`)
+implements this pattern; see `SECURITY.md` ("Webhook Endpoint Abuse
+Defenses") for the limits, log format, and configuration env vars.
+
 ## Testing
 
 ### Unit Tests
