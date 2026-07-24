@@ -7,7 +7,7 @@ import {
   type Log,
 } from "viem";
 import { mainnet } from "viem/chains";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { MEMBERSHIP_ABI, MEMBERSHIP_EVENTS } from "@guildpass/contracts";
 import { LeaderElectionService } from "../utils/leader-election.js";
 
@@ -207,7 +207,7 @@ export class IndexerCore {
         topics: log.topics,
       });
 
-      await this.db.$transaction(async (tx) => {
+      await this.db.$transaction(async (tx: Prisma.TransactionClient) => {
         const previousState = await this.applyEventApplication(decoded, tx);
         const fencingToken = this.leaderElection ? this.leaderElection.getGeneration() : 0;
 

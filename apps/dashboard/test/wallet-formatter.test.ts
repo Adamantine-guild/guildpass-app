@@ -1,40 +1,42 @@
-import { describe, it, expect } from "vitest";
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+
 import { formatWalletAddress } from "../lib/formatters/wallet";
 
 describe("formatWalletAddress", () => {
-  it("formats a standard long wallet address correctly", () => {
+  test("formats a standard long wallet address correctly", () => {
     const wallet = "0x742d35Cc6634C0532925a3b8879539d43374e290";
-    expect(formatWalletAddress(wallet)).toBe("0x742d…e290");
+    assert.equal(formatWalletAddress(wallet), "0x742d…e290");
   });
 
-  it("handles custom prefix and suffix lengths", () => {
+  test("handles custom prefix and suffix lengths", () => {
     const wallet = "0x742d35Cc6634C0532925a3b8879539d43374e290";
-    expect(formatWalletAddress(wallet, 4, 3)).toBe("0x74…290");
+    assert.equal(formatWalletAddress(wallet, 4, 3), "0x74…290");
   });
 
-  it("returns the full address if it is shorter than prefix + suffix", () => {
+  test("returns the full address if it is shorter than prefix + suffix", () => {
     const shortWallet = "0x123456";
-    expect(formatWalletAddress(shortWallet)).toBe("0x123456");
+    assert.equal(formatWalletAddress(shortWallet), "0x123456");
   });
 
-  it("returns the full address if it is exactly prefix + suffix", () => {
+  test("returns the full address if it is exactly prefix + suffix", () => {
     const exactWallet = "0x1234abcd";
-    expect(formatWalletAddress(exactWallet, 4, 4)).toBe("0x1234abcd");
+    assert.equal(formatWalletAddress(exactWallet, 4, 4), "0x1234abcd");
   });
 
-  it("handles missing or null wallet values gracefully", () => {
-    expect(formatWalletAddress(null)).toBe("—");
-    expect(formatWalletAddress(undefined)).toBe("—");
-    expect(formatWalletAddress("")).toBe("—");
+  test("handles missing or null wallet values gracefully", () => {
+    assert.equal(formatWalletAddress(null), "—");
+    assert.equal(formatWalletAddress(undefined), "—");
+    assert.equal(formatWalletAddress(""), "—");
   });
 
-  it("handles whitespace padding gracefully", () => {
+  test("handles whitespace padding gracefully", () => {
     const wallet = "  0x742d35Cc6634C0532925a3b8879539d43374e290  ";
-    expect(formatWalletAddress(wallet)).toBe("0x742d…e290");
+    assert.equal(formatWalletAddress(wallet), "0x742d…e290");
   });
 
-  it("handles mixed-case wallet values without altering case", () => {
+  test("handles mixed-case wallet values without altering case", () => {
     const wallet = "0xABCDefghIJKLmnopQRSTuvwxYZ1234567890abcd";
-    expect(formatWalletAddress(wallet)).toBe("0xABCD…abcd");
+    assert.equal(formatWalletAddress(wallet), "0xABCD…abcd");
   });
 });

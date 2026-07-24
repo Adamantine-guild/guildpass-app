@@ -102,9 +102,11 @@ The dashboard uses the following environment variables (set in `apps/dashboard/.
 | `GUILD_PASS_CORE_API_KEY` | — | API key for the core API (required in `live` mode, server-side only) |
 | `WEBHOOK_SECRET` | — | Secret for verifying incoming webhook signatures |
 | `NEXT_PUBLIC_ACTIVITY_REFRESH_MS` | `15000` | Activity polling fallback interval; `0` disables automatic SSE and polling |
-| `ACTIVITY_STORAGE_MODE` | `memory` | `memory` (in-memory) or `file` (persist across restarts) |
+| `ACTIVITY_STORAGE_MODE` | `memory` | `memory` (single-instance, reset on restart), `file` (local file-backed persistence), or `durable` (multi-instance-safe PostgreSQL-backed webhook idempotency) |
 | `ACTIVITY_STORAGE_DIR` | `.guildpass-activity` | Directory for file-based activity storage |
-| `DATABASE_URL` | — | PostgreSQL connection string (required when `DASHBOARD_STORAGE_MODE=durable`) |
+| `DATABASE_URL` | — | PostgreSQL connection string (required when `DASHBOARD_STORAGE_MODE=durable` or `ACTIVITY_STORAGE_MODE=durable`) |
+
+Webhook idempotency records are TTL-based and lazily expired after a 7-day retention window, so they do not grow unboundedly in local or shared deployments.
 
 For **Discord bot** or **access-api** development, additional variables are documented in [`.env.example`](./.env.example).
 

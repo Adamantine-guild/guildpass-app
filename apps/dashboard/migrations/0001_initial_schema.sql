@@ -84,8 +84,12 @@ CREATE INDEX IF NOT EXISTS idx_activity_ts
 
 CREATE TABLE IF NOT EXISTS processed_events (
   event_id      TEXT PRIMARY KEY,
-  processed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  processed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days'
 );
+
+CREATE INDEX IF NOT EXISTS idx_processed_events_expires_at
+  ON processed_events(expires_at);
 
 -- ── Settings (singleton row) ────────────────────────────────────────────────
 

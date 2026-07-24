@@ -110,9 +110,9 @@ abstract class DurableRepository {
   /**
    * Compute and record a field-level audit diff after a mutation.
    */
-  protected async recordDiff<T extends Record<string, unknown>>(
-    previous: T,
-    next: T,
+  protected async recordDiff(
+    previous: Record<string, unknown> | object,
+    next: Record<string, unknown> | object,
     type: ActivityEvent["type"],
     description: string,
     entityType: "pass" | "guild" | "member",
@@ -120,8 +120,10 @@ abstract class DurableRepository {
     entityName?: string,
   ): Promise<void> {
     if (!this.activityRepo) return;
-    const changes = computeDiff(previous, next);
-    if (changes.length === 0 && Object.keys(previous).length > 0) return;
+    const previousRecord = previous as Record<string, unknown>;
+    const nextRecord = next as Record<string, unknown>;
+    const changes = computeDiff(previousRecord, nextRecord);
+    if (changes.length === 0 && Object.keys(previousRecord).length > 0) return;
     await this.activityRepo.append({
       type,
       source: "dashboard",
@@ -225,6 +227,10 @@ function rowToSettings(row: any): DashboardSettings {
     };
   }
   return settings;
+}
+
+function generateEventId(): string {
+  return `evt_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
 }
 
 // ── Pass Repository ─────────────────────────────────────────────────────────
@@ -950,7 +956,7 @@ export class DurableMemberRepository
           );
         }
 
-        const changes = computeDiff(existing, updated);
+        const changes = computeDiff({ ...existing }, { ...updated });
         if (changes.length > 0 && this.activityRepo) {
           const hasRoleChange = changes.some((c) => c.field === "roles");
           const eventType: ActivityEvent["type"] = hasRoleChange
@@ -1021,7 +1027,7 @@ export class DurableMemberRepository
       );
       const updated = rowToMember(result.rows[0]);
 
-      const changes = computeDiff(existing, updated);
+      const changes = computeDiff({ ...existing }, { ...updated });
       if (changes.length > 0 && this.activityRepo) {
         const hasRoleChange = changes.some((c) => c.field === "roles");
         const eventType: ActivityEvent["type"] = hasRoleChange
