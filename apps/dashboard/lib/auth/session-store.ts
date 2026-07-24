@@ -297,7 +297,7 @@ export function createSessionStore(): SessionStore {
         sid: sessionId,
         name,
         role,
-        permissions: ROLE_PERMISSIONS[role],
+        permissions: [...ROLE_PERMISSIONS[role]],
         iat: nowSec,
         exp: nowSec + ACCESS_TOKEN_TTL,
       };

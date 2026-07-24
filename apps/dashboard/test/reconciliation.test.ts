@@ -387,12 +387,13 @@ describe("Reconciliation", () => {
       );
 
       assert.ok(reconcileEvent, "Should find a reconciliation audit event");
-      assert.equal(reconcileEvent.metadata.mode, "fix");
+      const metadata = reconcileEvent.metadata!;
+      assert.equal(metadata.mode, "fix");
       assert.equal(reconcileEvent.severity, "warning");
       assert.equal(reconcileEvent.actor.name, "Reconciliation Job");
-      assert.ok(Array.isArray(reconcileEvent.metadata.discrepancies));
-      assert.equal(reconcileEvent.metadata.discrepancies.length, 1);
-      assert.equal(reconcileEvent.metadata.discrepancies[0].field, "memberCount");
+      assert.ok(Array.isArray(metadata.discrepancies));
+      assert.equal(metadata.discrepancies.length, 1);
+      assert.equal(metadata.discrepancies[0].field, "memberCount");
     });
   });
 

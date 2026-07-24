@@ -68,7 +68,9 @@ export function useActivityFeed({
   severity,
   entityType,
   actor,
-  from,`n  sort,`n  refreshIntervalMs,
+  from,
+  sort,
+  refreshIntervalMs,
   autoRefresh = true,
   simulate = true,
   guildId,
@@ -97,7 +99,9 @@ export function useActivityFeed({
       severity,
       entityType,
       actor: actor?.trim() || undefined,
-      from,`n      sort,`n      guildId,
+      from,
+      sort,
+      guildId,
     }),
     [limit, type, source, severity, entityType, actor, from, sort, guildId]
   );
@@ -109,7 +113,9 @@ export function useActivityFeed({
       severity,
       entityType,
       actor: actor?.trim() || undefined,
-      from,`n      sort,`n    }),
+      from,
+      sort,
+    }),
     [actor, entityType, from, guildId, limit, severity, source, sort, type]
   );
   const cacheRevision = useQueryInvalidation(activityQueryKey);
@@ -118,7 +124,7 @@ export function useActivityFeed({
 
   const replaceEvents = useCallback((incoming: ActivityEvent[]) => {
     setEvents((previous) => {
-      const byId = new Map(previous.map((event) => [event.id, event]));
+      const byId = new Map<string, ActivityEvent>(previous.map((event) => [event.id, event]));
       incoming.forEach((event) => byId.set(event.id, event));
       const bounded = [...byId.values()].sort(compareActivityEvents).slice(0, maxEvents);
       seenIds.current = new Set(bounded.map((event) => event.id));

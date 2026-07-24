@@ -19,14 +19,24 @@ export interface FieldError {
   message: string;
 }
 
+/**
+ * Accepted patch shape for settings updates. Public settings fields plus the
+ * write-only `webhookForwardingSecret` (a plaintext string on write, `null`
+ * or "" to clear). Secret values are never returned on reads — see
+ * lib/settings.ts `WriteOnlySecret`.
+ */
+export type SettingsPatchPayload = Partial<DashboardSettings> & {
+  webhookForwardingSecret?: string | null;
+};
+
 export type SettingsValidationResult =
-  | { ok: true; value: Partial<DashboardSettings> }
+  | { ok: true; value: SettingsPatchPayload }
   | { ok: false; errors: FieldError[] };
 
 const settingsPatchSchema = z
   .object({
     workspaceName: z
-      .string({ invalid_type_error: "Workspace name is required." })
+      .string({ error: "Workspace name is required." })
       .trim()
       .min(1, { message: "Workspace name is required." })
       .max(MAX_TEXT_LENGTH, {
@@ -34,7 +44,7 @@ const settingsPatchSchema = z
       })
       .optional(),
     displayName: z
-      .string({ invalid_type_error: "Display name is required." })
+      .string({ error: "Display name is required." })
       .trim()
       .min(1, { message: "Display name is required." })
       .max(MAX_TEXT_LENGTH, {
@@ -42,12 +52,10 @@ const settingsPatchSchema = z
       })
       .optional(),
     timezone: z.enum(ALLOWED_TIMEZONES, {
-      errorMap: () => ({
-        message: `Timezone must be one of: ${ALLOWED_TIMEZONES.join(", ")}.`,
-      }),
+      error: `Timezone must be one of: ${ALLOWED_TIMEZONES.join(", ")}.`,
     }).optional(),
     email: z
-      .string({ invalid_type_error: "A valid email address is required." })
+      .string({ error: "A valid email address is required." })
       .trim()
       .email({ message: "A valid email address is required." })
       .optional(),
@@ -74,8 +82,7 @@ export function validateSettingsPatch(input: unknown): SettingsValidationResult 
     return { ok: false, errors: mapZodErrors(result.error.issues) };
   }
 
-  const patch = result.data as SettingsPatchPayload;
-  const supportedKeys = ["workspaceName", "displayName", "timezone", "email", "webhookForwardingSecret"];
+  const supportedKeys = ["workspaceName", "displayName", "timezone", "email", "webhookForwardingSecret"] as const;
   const providedSupportedFields = supportedKeys.filter((key) =>
     Object.prototype.hasOwnProperty.call(input, key)
   );
@@ -84,6 +91,27 @@ export function validateSettingsPatch(input: unknown): SettingsValidationResult 
     return {
       ok: false,
       errors: [{ field: "_root", message: "No supported settings fields were provided." }],
+    };
+  }
+
+  // Only supported keys reach the caller: the schema uses .passthrough() so
+  // unknown keys parse successfully, but they must never be merged into the
+  // persisted document.
+  const raw = result.data as Record<string, unknown>;
+  const rawInput = input as Record<string, unknown>;
+  const patch: SettingsPatchPayload = {};
+  for (const key of providedSupportedFields) {
+    (patch as Record<string, unknown>)[key] = key === "webhookForwardingSecret" ? rawInput[key] : raw[key];
+  }
+
+  if (
+    "webhookForwardingSecret" in patch &&
+    patch.webhookForwardingSecret !== null &&
+    typeof patch.webhookForwardingSecret !== "string"
+  ) {
+    return {
+      ok: false,
+      errors: [{ field: "webhookForwardingSecret", message: "webhookForwardingSecret must be a string." }],
     };
   }
 

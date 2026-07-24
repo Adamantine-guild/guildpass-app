@@ -1,4 +1,8 @@
-import { test, describe } from "node:test";`nimport assert from "node:assert";`nimport { readFileSync } from "node:fs";
+import { test, describe } from "node:test";
+import assert from "node:assert";
+import { Buffer } from "node:buffer";
+import { URL } from "node:url";
+import { readFileSync } from "node:fs";
 import { verifySignature, generateSignature } from "../dist/index.js";
 
 describe("verifySignature", () => {
@@ -257,6 +261,10 @@ describe("verifySignature", () => {
         payload: PAYLOAD,
       });
 
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error.includes("timestamp"));
+    });
+
     test("should reject empty v1 signature value", () => {
       const timestamp = Math.floor(Date.now() / 1000);
       const result = verifySignature({
@@ -302,9 +310,6 @@ describe("verifySignature", () => {
 
       assert.strictEqual(result.valid, false);
       assert.strictEqual(result.error, "Invalid signature");
-    });
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error.includes("timestamp"));
     });
   });
 

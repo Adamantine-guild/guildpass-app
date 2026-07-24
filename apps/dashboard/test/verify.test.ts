@@ -8,7 +8,7 @@ test("POST /api/verify returns mock verification in mock mode", async () => {
   try {
     const { POST } = await import("../app/api/verify/route.js");
 
-    const payload = { discordUserId: "user_123", wallet: "0xabc" };
+    const payload = { discordUserId: "user_123", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" };
     const req = new Request("http://localhost/api/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -121,7 +121,8 @@ describe("activity query contract", () => {
     assert.equal(parsed.value.severity, "error");
     assert.equal(parsed.value.entityType, "member");
     assert.equal(parsed.value.actor, "alice");
-    assert.equal(parsed.value.from, "2025-01-01T00:00:00.000Z");`n    assert.equal(parsed.value.sort, "oldest");
+    assert.equal(parsed.value.from, "2025-01-01T00:00:00.000Z");
+    assert.equal(parsed.value.sort, "oldest");
   });
 
   test("rejects invalid query parameters with field-specific errors", () => {

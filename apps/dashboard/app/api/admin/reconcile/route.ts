@@ -31,18 +31,18 @@ import { getActiveGuildId } from "@/lib/guild-context";
 // ── Counting strategies ───────────────────────────────────────────────────────
 //
 // Same defaults as the CLI script. In production, these should use direct SQL
-// queries for performance. For mock mode, they count all entries since members
-// and passes are not yet partitioned by guild in the mock data model.
+// queries for performance. Member and pass repositories are tenant-scoped, so
+// counts are always per guild (see docs/multi-tenancy.md).
 
-async function countMembersForGuild(_guildId: string): Promise<number> {
+async function countMembersForGuild(guildId: string): Promise<number> {
   const memberRepo = getMemberRepository();
-  const all = await memberRepo.getAll();
+  const all = await memberRepo.getAll(guildId);
   return all.length;
 }
 
-async function countPassesForGuild(_guildId: string): Promise<number> {
+async function countPassesForGuild(guildId: string): Promise<number> {
   const passRepo = getPassRepository();
-  const all = await passRepo.getAll();
+  const all = await passRepo.getAll(guildId);
   return all.length;
 }
 

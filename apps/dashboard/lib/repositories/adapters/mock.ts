@@ -10,9 +10,13 @@ import type {
   IMemberRepository,
   IActivityRepository,
   ISettingsRepository,
+  MemberCreateData,
   MemberListQuery,
+  MemberUpdateData,
   PaginatedResult,
+  PassCreateData,
   PassListQuery,
+  PassUpdateData,
 } from "../types";
 import type { Pass, Guild, Member } from "../../mock-data";
 import type { ActivityEvent } from "@/lib/activity/types";
@@ -21,13 +25,21 @@ import type { DashboardSettings } from "../../settings";
 import { mockPasses, mockGuilds, mockMembers } from "../../mock-data";
 import { DEFAULT_SETTINGS } from "../../settings";
 import { filterMembers, filterPasses, paginateItems } from "@/lib/pagination";
+import { computeDiff } from "@/lib/activity/diff";
+import { ConflictError } from "@/lib/api-errors";
 
 /**
  * Mock pass repository: in-memory storage.
+ *
+ * Multi-tenant isolation (docs/multi-tenancy.md): every method takes an
+ * explicit `guildId` scope; a scoped call that references another guild's
+ * record behaves exactly as if the record does not exist, and `guildId` is
+ * pinned from the scope parameter on writes so a payload can never move a
+ * record across tenants.
  */
 export class MockPassRepository implements IPassRepository {
   private passes: Map<string, Pass> = new Map();
-  private nextId = 5;
+  private nextId = 11;
   private activityRepo?: IActivityRepository;
 
   constructor(activityRepo?: IActivityRepository) {
@@ -35,24 +47,33 @@ export class MockPassRepository implements IPassRepository {
     this.activityRepo = activityRepo;
   }
 
-  async getAll(): Promise<Pass[]> {
-    return Array.from(this.passes.values());
+  /** Resolve a pass only if it belongs to the given guild. */
+  private getScoped(guildId: string, id: string): Pass | null {
+    const pass = this.passes.get(id);
+    return pass && pass.guildId === guildId ? pass : null;
   }
 
-  async query(options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
-    const filtered = filterPasses(await this.getAll(), options);
+  async getAll(guildId: string): Promise<Pass[]> {
+    return Array.from(this.passes.values()).filter((p) => p.guildId === guildId);
+  }
+
+  async query(guildId: string, options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
+    const filtered = filterPasses(await this.getAll(guildId), options);
     return paginateItems(filtered, options);
   }
 
-  async getById(id: string): Promise<Pass | null> {
-    return this.passes.get(id) ?? null;
+  async getById(guildId: string, id: string): Promise<Pass | null> {
+    return this.getScoped(guildId, id);
   }
 
-  async create(pass: Omit<Pass, "id" | "createdAt">): Promise<Pass> {
+  async create(guildId: string, pass: PassCreateData): Promise<Pass> {
     const id = String(this.nextId++);
     const newPass: Pass = {
       ...pass,
+      status: pass.status ?? "draft",
+      currentSupply: pass.currentSupply ?? 0,
       id,
+      guildId,
       createdAt: new Date().toISOString(),
     };
     this.passes.set(id, newPass);
@@ -64,10 +85,10 @@ export class MockPassRepository implements IPassRepository {
     return newPass;
   }
 
-  async update(id: string, pass: Partial<Pass>): Promise<Pass | null> {
-    const existing = this.passes.get(id);
+  async update(guildId: string, id: string, pass: PassUpdateData): Promise<Pass | null> {
+    const existing = this.getScoped(guildId, id);
     if (!existing) return null;
-    const updated = { ...existing, ...pass, id };
+    const updated: Pass = { ...existing, ...pass, id, guildId: existing.guildId };
     this.passes.set(id, updated);
 
     // Compute diff and record activity
@@ -82,10 +103,11 @@ export class MockPassRepository implements IPassRepository {
     return updated;
   }
 
-  async delete(id: string): Promise<boolean> {
-    const existing = this.passes.get(id);
+  async delete(guildId: string, id: string): Promise<boolean> {
+    const existing = this.getScoped(guildId, id);
+    if (!existing) return false;
     const deleted = this.passes.delete(id);
-    if (deleted && existing) {
+    if (deleted) {
       await this.recordActivity("pass.deleted", `Pass deleted: ${existing.name}`, existing);
     }
     return deleted;
@@ -193,44 +215,70 @@ export class MockGuildRepository implements IGuildRepository {
 
 /**
  * Mock member repository: in-memory storage.
+ *
+ * Multi-tenant isolation (docs/multi-tenancy.md): every method takes an
+ * explicit `guildId` scope; wallets are unique per guild (the wallet index is
+ * keyed on `(guildId, wallet)`), and a scoped call that references another
+ * guild's record behaves exactly as if the record does not exist.
  */
 export class MockMemberRepository implements IMemberRepository {
   private members: Map<string, Member> = new Map();
   private walletIndex: Map<string, string> = new Map();
-  private nextId = 5;
+  private nextId = 11;
   private activityRepo?: IActivityRepository;
 
   constructor(activityRepo?: IActivityRepository) {
     mockMembers.forEach((m) => {
       this.members.set(m.id, { ...m });
-      this.walletIndex.set(m.wallet, m.id);
+      this.walletIndex.set(this.walletKey(m.guildId, m.wallet), m.id);
     });
     this.activityRepo = activityRepo;
   }
 
-  async getAll(): Promise<Member[]> {
-    return Array.from(this.members.values());
+  /** Composite wallet-index key: wallets are unique per guild, not globally. */
+  private walletKey(guildId: string, wallet: string): string {
+    return `${guildId}::${wallet}`;
   }
 
-  async query(options: MemberListQuery = {}): Promise<PaginatedResult<Member>> {
-    const filtered = filterMembers(await this.getAll(), options);
+  /** Resolve a member only if it belongs to the given guild. */
+  private getScoped(guildId: string, id: string): Member | null {
+    const member = this.members.get(id);
+    return member && member.guildId === guildId ? member : null;
+  }
+
+  async getAll(guildId: string): Promise<Member[]> {
+    return Array.from(this.members.values()).filter((m) => m.guildId === guildId);
+  }
+
+  async query(guildId: string, options: MemberListQuery = {}): Promise<PaginatedResult<Member>> {
+    const filtered = filterMembers(await this.getAll(guildId), options);
     return paginateItems(filtered, options);
   }
 
-  async getById(id: string): Promise<Member | null> {
-    return this.members.get(id) ?? null;
+  async getById(guildId: string, id: string): Promise<Member | null> {
+    return this.getScoped(guildId, id);
   }
 
-  async getByWallet(wallet: string): Promise<Member | null> {
-    const id = this.walletIndex.get(wallet);
-    return id ? this.members.get(id) ?? null : null;
+  async getByWallet(guildId: string, wallet: string): Promise<Member | null> {
+    const id = this.walletIndex.get(this.walletKey(guildId, wallet));
+    return id ? this.getScoped(guildId, id) : null;
   }
 
-  async create(member: Omit<Member, "id">): Promise<Member> {
+  async create(guildId: string, member: MemberCreateData): Promise<Member> {
     const id = String(this.nextId++);
-    const newMember: Member = { ...member, id };
+    const now = new Date().toISOString();
+    const newMember: Member = {
+      ...member,
+      status: member.status ?? "pending",
+      roles: member.roles ?? [],
+      joinedAt: member.joinedAt ?? now,
+      lastActive: member.lastActive ?? now,
+      id,
+      guildId,
+      version: 1,
+    };
     this.members.set(id, newMember);
-    this.walletIndex.set(member.wallet, id);
+    this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
 
     const changes = computeDiff({} as Record<string, unknown>, newMember as unknown as Record<string, unknown>);
     await this.recordActivity("member.joined", `${newMember.name} joined`, newMember, changes);
@@ -238,14 +286,33 @@ export class MockMemberRepository implements IMemberRepository {
     return newMember;
   }
 
-  async update(id: string, member: Partial<Member>): Promise<Member | null> {
-    const existing = this.members.get(id);
+  async update(
+    guildId: string,
+    id: string,
+    member: MemberUpdateData,
+    expectedVersion?: number,
+  ): Promise<Member | null> {
+    const existing = this.getScoped(guildId, id);
     if (!existing) return null;
-    const updated = { ...existing, ...member, id };
+
+    // Optimistic concurrency control: reject if version doesn't match
+    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+      throw new ConflictError(
+        "This member was updated elsewhere — refresh and retry.",
+      );
+    }
+
+    const updated: Member = {
+      ...existing,
+      ...member,
+      id,
+      guildId: existing.guildId,
+      version: existing.version + 1,
+    };
     this.members.set(id, updated);
     if (member.wallet && member.wallet !== existing.wallet) {
-      this.walletIndex.delete(existing.wallet);
-      this.walletIndex.set(member.wallet, id);
+      this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
+      this.walletIndex.set(this.walletKey(existing.guildId, member.wallet), id);
     }
 
     // Compute diff to determine what changed and what event type to emit
@@ -267,16 +334,25 @@ export class MockMemberRepository implements IMemberRepository {
     return updated;
   }
 
-  async delete(id: string): Promise<boolean> {
-    const existing = this.members.get(id);
-    if (existing) {
-      this.walletIndex.delete(existing.wallet);
-    }
+  async delete(guildId: string, id: string): Promise<boolean> {
+    const existing = this.getScoped(guildId, id);
+    if (!existing) return false;
+    this.walletIndex.delete(this.walletKey(existing.guildId, existing.wallet));
     const deleted = this.members.delete(id);
-    if (deleted && existing) {
+    if (deleted) {
       await this.recordActivity("member.left", `${existing.name} left`, existing);
     }
     return deleted;
+  }
+
+  async *streamAll(guildId: string, chunkSize = 500): AsyncIterable<Member[]> {
+    const members = Array.from(this.members.values()).filter(
+      (m) => m.guildId === guildId,
+    );
+
+    for (let i = 0; i < members.length; i += chunkSize) {
+      yield members.slice(i, i + chunkSize);
+    }
   }
 
   private async recordActivity(
@@ -305,7 +381,7 @@ export class MockActivityRepository implements IActivityRepository {
   private events: ActivityEvent[] = [];
   private processedIds: Set<string> = new Set();
 
-  async append(event: Omit<ActivityEvent, "id" | "timestamp"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
+  async append(event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
     const fullEvent: ActivityEvent = {
       ...event,
       id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

@@ -24,13 +24,8 @@ import { canEditSettings } from "@/lib/permissions";
 import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
 import { readApiResult } from "@/lib/api-client";
 import type { DashboardSettings } from "@/lib/settings";
-<<<<<<< HEAD
-import { useState, useRef, useEffect } from "react";
-=======
-import { SUPPORTED_TIMEZONES } from "@/lib/timezones";
 import { validateEmailField } from "@/lib/validation/settings";
 import { useState, useRef, useEffect, useCallback } from "react";
->>>>>>> main
 
 export default function SettingsPage() {
   const session = useSession();

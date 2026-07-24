@@ -14,7 +14,7 @@ describe("GET /api/settings", () => {
   beforeEach(() => clearRepositories());
 
   test("returns typed dashboard settings (settings:read is held by readonly)", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/settings"));
     const body = await res.json();
 
     assert.equal(res.status, 200);
@@ -27,7 +27,7 @@ describe("GET /api/settings", () => {
 
   test("reflects a persisted update from the mock repository", async () => {
     await getSettingsRepository().update({ workspaceName: "Persisted DAO" });
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/settings"));
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.equal(body.data.workspaceName, "Persisted DAO");

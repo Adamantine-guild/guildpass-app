@@ -1,12 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { WEBHOOK_FIXTURES, FIXED_UNIX, makeWebhookPayload } from "./fixtures";
-import type { ActivityEvent } from "../lib/activity/types";
-import type { WebhookPayload } from "../lib/activity/types";
-import { WEBHOOK_FIXTURES, makeWebhookPayload } from "./fixtures.ts";
-import type { ActivityEvent } from "../lib/activity/types.ts";
+import { WEBHOOK_FIXTURES, makeWebhookPayload } from "./fixtures";
+import type { ActivityEvent, WebhookPayload } from "../lib/activity/types";
 import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
-import type { WebhookPayload } from "../lib/activity/types.ts";
 
 /**
  * webhook-mapper.test.ts

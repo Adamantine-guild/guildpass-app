@@ -12,7 +12,7 @@ import type { PaginatedResponse } from "../api-contracts";
  * Input type for appending an activity event.
  * `schemaVersion` defaults to the current version when omitted.
  */
-export type ActivityEventInput = Omit<ActivityEvent, "id" | "timestamp"> &
+export type ActivityEventInput = Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> &
   Partial<Pick<ActivityEvent, "schemaVersion">>;
 
 export interface PaginationOptions {
@@ -35,13 +35,15 @@ export interface MemberListQuery extends PaginationOptions {
 }
 
 /**
-<<<<<<< HEAD
-=======
  * Create input for a pass. `guildId` is intentionally excluded: the owning
  * guild comes only from the explicit `guildId` scope parameter, so a payload
- * can never assign a record to a different tenant.
+ * can never assign a record to a different tenant. Adapters fill defaults for
+ * omitted fields (`status` defaults to "draft", `currentSupply` to 0).
  */
-export type PassCreateData = Omit<Pass, "id" | "createdAt" | "guildId">;
+export type PassCreateData = Omit<Pass, "id" | "createdAt" | "guildId" | "status" | "currentSupply"> & {
+  status?: Pass["status"];
+  currentSupply?: number;
+};
 
 /**
  * Update input for a pass. `id` and `guildId` are excluded so a patch can
@@ -50,46 +52,62 @@ export type PassCreateData = Omit<Pass, "id" | "createdAt" | "guildId">;
 export type PassUpdateData = Partial<Omit<Pass, "id" | "guildId">>;
 
 /** Create input for a member. See {@link PassCreateData} for the rationale.
- * `version` is excluded — the server always initializes it to 1. */
-export type MemberCreateData = Omit<Member, "id" | "guildId" | "version">;
+ * `version` is excluded — the server always initializes it to 1. Adapters
+ * fill defaults for omitted fields (`status` defaults to "pending", `roles`
+ * to [], `joinedAt`/`lastActive` to the creation time). */
+export type MemberCreateData = Omit<Member, "id" | "guildId" | "version" | "status" | "roles" | "joinedAt" | "lastActive"> & {
+  status?: Member["status"];
+  roles?: string[];
+  joinedAt?: string;
+  lastActive?: string;
+};
 
 /** Update input for a member. See {@link PassUpdateData} for the rationale. */
 export type MemberUpdateData = Partial<Omit<Member, "id" | "guildId">>;
 
 /**
->>>>>>> main
  * Repository for managing passes.
+ *
+ * Multi-tenant isolation guarantee: every method requires an explicit
+ * `guildId` scope as its first parameter — omitting it is a compile error,
+ * not a runtime possibility. Implementations MUST guarantee that a call
+ * scoped to guild A can never read, modify, or delete guild B's data, even
+ * when given an ID that exists in another guild (such calls behave exactly
+ * as if the record does not exist). See docs/multi-tenancy.md.
  */
 export interface IPassRepository {
   /**
-   * Get all passes.
+   * Get all passes belonging to the given guild.
    */
-  getAll(): Promise<Pass[]>;
+  getAll(guildId: string): Promise<Pass[]>;
 
   /**
-   * Query passes with filtering and bounded pagination.
+   * Query the guild's passes with filtering and bounded pagination.
    */
-  query(options?: PassListQuery): Promise<PaginatedResult<Pass>>;
+  query(guildId: string, options?: PassListQuery): Promise<PaginatedResult<Pass>>;
 
   /**
-   * Get a pass by ID.
+   * Get a pass by ID. Returns null when the pass does not exist
+   * or belongs to a different guild.
    */
-  getById(id: string): Promise<Pass | null>;
+  getById(guildId: string, id: string): Promise<Pass | null>;
 
   /**
-   * Create a new pass.
+   * Create a new pass owned by the given guild.
    */
-  create(pass: Omit<Pass, "id" | "createdAt">): Promise<Pass>;
+  create(guildId: string, pass: PassCreateData): Promise<Pass>;
 
   /**
-   * Update an existing pass.
+   * Update an existing pass. Returns null when the pass does not exist
+   * or belongs to a different guild. The owning guild can never change.
    */
-  update(id: string, pass: Partial<Pass>): Promise<Pass | null>;
+  update(guildId: string, id: string, pass: PassUpdateData): Promise<Pass | null>;
 
   /**
-   * Delete a pass.
+   * Delete a pass. Returns false when the pass does not exist
+   * or belongs to a different guild.
    */
-  delete(id: string): Promise<boolean>;
+  delete(guildId: string, id: string): Promise<boolean>;
 }
 
 /**
@@ -124,39 +142,44 @@ export interface IGuildRepository {
 
 /**
  * Repository for managing members.
+ *
+ * Multi-tenant isolation guarantee: every method requires an explicit
+ * `guildId` scope as its first parameter — omitting it is a compile error,
+ * not a runtime possibility. Implementations MUST guarantee that a call
+ * scoped to guild A can never read, modify, or delete guild B's data, even
+ * when given an ID or wallet that exists in another guild (such calls behave
+ * exactly as if the record does not exist). See docs/multi-tenancy.md.
  */
 export interface IMemberRepository {
   /**
-   * Get all members.
+   * Get all members belonging to the given guild.
    */
-  getAll(): Promise<Member[]>;
+  getAll(guildId: string): Promise<Member[]>;
 
   /**
-   * Query members with filtering and bounded pagination.
+   * Query the guild's members with filtering and bounded pagination.
    */
-  query(options?: MemberListQuery): Promise<PaginatedResult<Member>>;
+  query(guildId: string, options?: MemberListQuery): Promise<PaginatedResult<Member>>;
 
   /**
-   * Get a member by ID.
+   * Get a member by ID. Returns null when the member does not exist
+   * or belongs to a different guild.
    */
-  getById(id: string): Promise<Member | null>;
+  getById(guildId: string, id: string): Promise<Member | null>;
 
   /**
-   * Get a member by wallet address.
+   * Get a member of the given guild by wallet address. Returns null when no
+   * member with that wallet exists in this guild, even if the same wallet is
+   * a member of another guild.
    */
-  getByWallet(wallet: string): Promise<Member | null>;
+  getByWallet(guildId: string, wallet: string): Promise<Member | null>;
 
   /**
-   * Create a new member.
+   * Create a new member owned by the given guild.
    */
-  create(member: Omit<Member, "id">): Promise<Member>;
+  create(guildId: string, member: MemberCreateData): Promise<Member>;
 
   /**
-<<<<<<< HEAD
-   * Update a member.
-   */
-  update(id: string, member: Partial<Member>): Promise<Member | null>;
-=======
    * Update a member. Returns null when the member does not exist
    * or belongs to a different guild. The owning guild can never change.
    *
@@ -165,14 +188,11 @@ export interface IMemberRepository {
    * rather than a silent overwrite.
    */
   update(guildId: string, id: string, member: MemberUpdateData, expectedVersion?: number): Promise<Member | null>;
->>>>>>> main
 
   /**
-   * Delete a member.
+   * Delete a member. Returns false when the member does not exist
+   * or belongs to a different guild.
    */
-<<<<<<< HEAD
-  delete(id: string): Promise<boolean>;
-=======
   delete(guildId: string, id: string): Promise<boolean>;
 
   /**
@@ -184,7 +204,6 @@ export interface IMemberRepository {
    * memory usage stays proportional to `chunkSize`, not the total count.
    */
   streamAll(guildId: string, chunkSize?: number): AsyncIterable<Member[]>;
->>>>>>> main
 }
 
 /**

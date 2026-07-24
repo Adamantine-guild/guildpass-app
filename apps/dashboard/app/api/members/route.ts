@@ -36,6 +36,16 @@ export async function GET(request: Request): Promise<NextResponse> {
     const query = parseMemberListQuery(request);
 
     if (apiMode === "live") {
+      // Live mode only supports direct lookups; a bare list request is
+      // unsupported — reject it before constructing a client we won't use.
+      if (!wallet && !discordUserId) {
+        return apiUnsupported(
+          "members.list",
+          apiMode,
+          "Live mode requires a lookup (wallet or discordUserId)"
+        );
+      }
+
       const testClient = (globalThis as any).__TEST_INTEGRATION_CLIENT;
       let client;
 
@@ -191,8 +201,9 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 
     const memberRepository = getMemberRepository();
     const guildId = getActiveGuildId(request);
+    const { version: expectedVersion, ...updateData } = validation.data;
     const existing = validation.data.roles ? await memberRepository.getById(guildId, id) : null;
-    const updated = await memberRepository.update(guildId, id, validation.data, expectedVersion);
+    const updated = await memberRepository.update(guildId, id, updateData, expectedVersion);
     if (!updated) throw new NotFoundError("Member not found.");
     const rolesChanged = existing && validation.data.roles && JSON.stringify(existing.roles) !== JSON.stringify(validation.data.roles);
     if (rolesChanged) {

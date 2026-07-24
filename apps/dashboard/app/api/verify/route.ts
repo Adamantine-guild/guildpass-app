@@ -6,7 +6,7 @@ handleApiError,
 } from "@/lib/api-helpers";
 import { validateLiveModeEnv, getApiMode } from "@/lib/env";
 import { IntegrationClient, type VerificationResult } from "@guildpass/integration-client";
-import { isValidChecksumAddress, normaliseAddress } from "@/dashboard/lib/address";
+import { isValidChecksumAddress, normaliseAddress } from "@/lib/address";
 
 export async function POST(request: Request): Promise<NextResponse> {
   return handleApiError(async () => {

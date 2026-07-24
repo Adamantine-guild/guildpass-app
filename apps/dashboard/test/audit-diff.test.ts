@@ -223,7 +223,7 @@ describe("MockMemberRepository diff recording", () => {
     const memberRepo = new MockMemberRepository(activityRepo);
 
     // Charlie (id="3") has roles=[]
-    const updated = await memberRepo.update("3", { roles: ["contributor"], status: "active" });
+    const updated = await memberRepo.update("1", "3", { roles: ["contributor"], status: "active" });
     assert.ok(updated);
     assert.deepEqual(updated.roles, ["contributor"]);
 
@@ -243,7 +243,7 @@ describe("MockMemberRepository diff recording", () => {
     const memberRepo = new MockMemberRepository(activityRepo);
 
     // Diana (id="4") is inactive — change to active
-    const updated = await memberRepo.update("4", { status: "active" });
+    const updated = await memberRepo.update("1", "4", { status: "active" });
     assert.ok(updated);
     assert.equal(updated.status, "active");
 
