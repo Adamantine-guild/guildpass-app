@@ -5,7 +5,11 @@ import http from "node:http";
 test("POST /api/verify forwards to core API in live mode", async () => {
   const previousMode = process.env.DASHBOARD_API_MODE;
   const previousCoreUrl = process.env.GUILD_PASS_CORE_URL;
+  const previousApiKey = process.env.GUILD_PASS_CORE_API_KEY;
+  const previousWebhookSecret = process.env.WEBHOOK_SECRET;
   process.env.DASHBOARD_API_MODE = "live";
+  process.env.GUILD_PASS_CORE_API_KEY = "test-core-api-key";
+  process.env.WEBHOOK_SECRET = "test-webhook-secret";
 
   // Note: this test requires a mock HTTP server; see live-verify-mockclient for injected version
   const server = http.createServer((req, res) => {
@@ -43,7 +47,7 @@ test("POST /api/verify forwards to core API in live mode", async () => {
   try {
     const { POST } = await import("../app/api/verify/route.js");
 
-    const payload = { discordUserId: "u_live", wallet: "0xfeed" };
+    const payload = { discordUserId: "u_live", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" };
     const req = new Request("http://localhost/api/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -73,6 +77,18 @@ test("POST /api/verify forwards to core API in live mode", async () => {
       delete process.env.GUILD_PASS_CORE_URL;
     } else {
       process.env.GUILD_PASS_CORE_URL = previousCoreUrl;
+    }
+
+    if (previousApiKey === undefined) {
+      delete process.env.GUILD_PASS_CORE_API_KEY;
+    } else {
+      process.env.GUILD_PASS_CORE_API_KEY = previousApiKey;
+    }
+
+    if (previousWebhookSecret === undefined) {
+      delete process.env.WEBHOOK_SECRET;
+    } else {
+      process.env.WEBHOOK_SECRET = previousWebhookSecret;
     }
   }
 });

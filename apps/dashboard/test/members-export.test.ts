@@ -31,6 +31,7 @@ import { DEFAULT_GUILD_ID } from "../lib/mock-data";
 
 function makeTestMember(index: number): Omit<Member, "id" | "guildId"> {
   return {
+    version: 1,
     wallet: `0x${String(index).padStart(40, "0")}`,
     name: `Member ${index}`,
     status: index % 3 === 0 ? "pending" : index % 5 === 0 ? "inactive" : "active",
@@ -45,6 +46,8 @@ test("streamAll yields members in bounded-size chunks without materializing all"
   const repo = getMemberRepository();
   const COUNT = 150;
   const CHUNK = 50;
+  // The mock adapter is seeded; streamAll returns seeded + created members.
+  const seeded = (await repo.getAll(DEFAULT_GUILD_ID)).length;
 
   for (let i = 0; i < COUNT; i++) {
     await repo.create(DEFAULT_GUILD_ID, makeTestMember(i));
@@ -56,10 +59,10 @@ test("streamAll yields members in bounded-size chunks without materializing all"
     assert.ok(chunk.length <= CHUNK, `chunk size ${chunk.length} > ${CHUNK}`);
   }
 
-  // 150 members @ 50/chunk = 3 chunks
-  assert.equal(chunks.length, Math.ceil(COUNT / CHUNK));
+  const expected = COUNT + seeded;
+  assert.equal(chunks.length, Math.ceil(expected / CHUNK));
   const total = chunks.reduce((sum, c) => sum + c.length, 0);
-  assert.equal(total, COUNT);
+  assert.equal(total, expected);
 });
 
 test("streamAll respects guild isolation", async () => {
@@ -83,6 +86,7 @@ test("streamAll with 10k+ members yields correct total without OOM", async () =>
   const repo = getMemberRepository();
   const COUNT = 10_000;
   const CHUNK = 500;
+  const seeded = (await repo.getAll(DEFAULT_GUILD_ID)).length;
 
   for (let i = 0; i < COUNT; i++) {
     await repo.create(DEFAULT_GUILD_ID, makeTestMember(i));
@@ -96,8 +100,9 @@ test("streamAll with 10k+ members yields correct total without OOM", async () =>
     assert.ok(chunk.length <= CHUNK, `chunk ${chunkCount} size ${chunk.length} > ${CHUNK}`);
   }
 
-  assert.equal(total, COUNT);
-  assert.equal(chunkCount, Math.ceil(COUNT / CHUNK));
+  const expected = COUNT + seeded;
+  assert.equal(total, expected);
+  assert.equal(chunkCount, Math.ceil(expected / CHUNK));
 });
 
 test("memberToCsvRow produces correctly escaped CSV", () => {
@@ -108,6 +113,7 @@ test("memberToCsvRow produces correctly escaped CSV", () => {
     name: 'Alice "The Great", Esq.',
     status: "active",
     roles: ["admin", "member"],
+    version: 1,
     joinedAt: "2025-01-01T00:00:00Z",
     lastActive: "2025-01-02T00:00:00Z",
   };
@@ -120,8 +126,8 @@ test("memberToCsvRow produces correctly escaped CSV", () => {
 
 test("toMembersCsv includes headers and all rows", () => {
   const members: Member[] = [
-    { id: "1", guildId: DEFAULT_GUILD_ID, wallet: "0xa", name: "Alice", status: "active", roles: ["member"], joinedAt: "2025-01-01T00:00:00Z", lastActive: "2025-01-02T00:00:00Z" },
-    { id: "2", guildId: DEFAULT_GUILD_ID, wallet: "0xb", name: "Bob", status: "inactive", roles: [], joinedAt: "2025-02-01T00:00:00Z", lastActive: "2025-02-02T00:00:00Z" },
+    { id: "1", guildId: DEFAULT_GUILD_ID, version: 1, wallet: "0xa", name: "Alice", status: "active", roles: ["member"], joinedAt: "2025-01-01T00:00:00Z", lastActive: "2025-01-02T00:00:00Z" },
+    { id: "2", guildId: DEFAULT_GUILD_ID, version: 1, wallet: "0xb", name: "Bob", status: "inactive", roles: [], joinedAt: "2025-02-01T00:00:00Z", lastActive: "2025-02-02T00:00:00Z" },
   ];
 
   const csv = toMembersCsv(members);
@@ -138,6 +144,7 @@ test("streamAll + memberToCsvRow compose into full CSV without buffering all", a
   const repo = getMemberRepository();
   const COUNT = 500;
   const CHUNK = 100;
+  const seeded = (await repo.getAll(DEFAULT_GUILD_ID)).length;
 
   for (let i = 0; i < COUNT; i++) {
     await repo.create(DEFAULT_GUILD_ID, makeTestMember(i));
@@ -151,9 +158,9 @@ test("streamAll + memberToCsvRow compose into full CSV without buffering all", a
     for (const m of chunk) rows.push(memberToCsvRow(m));
   }
 
-  assert.equal(totalMembers, COUNT);
-  assert.equal(rows.length, COUNT);
-  // Verify first and last members are present
-  assert.ok(rows[0].includes("Member 0"));
-  assert.ok(rows[COUNT - 1].includes(`Member ${COUNT - 1}`));
+  assert.equal(totalMembers, COUNT + seeded);
+  assert.equal(rows.length, COUNT + seeded);
+  // Verify first and last created members are present
+  assert.ok(rows.some((r) => r.includes("Member 0")));
+  assert.ok(rows.some((r) => r.includes(`Member ${COUNT - 1}`)));
 });

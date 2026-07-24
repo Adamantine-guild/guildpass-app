@@ -17,10 +17,10 @@ import crypto from "crypto";
  *     create/delete operations interleave. Deriving the value on read makes
  *     drift impossible: the number is always whatever the member/pass repos
  *     actually contain.
- *   - The Member and Pass types carry no guildId foreign key (see mock-data.ts):
- *     this dashboard models a single workspace, so a guild's counts reflect the
- *     total membership / pass supply of the workspace. There is no per-guild
- *     partition to sum, which makes read-time derivation both simple and exact.
+ *   - The Member and Pass types carry a guildId foreign key (see mock-data.ts),
+ *     and the member/pass repositories are tenant-scoped: a guild's counts are
+ *     derived by querying each repository with that guild's scope, so counts
+ *     always reflect exactly the records owned by that guild.
  *   - Tradeoff: each read pays for a getAll on members and passes. For the
  *     in-memory adapter this is an O(n) Map scan and negligible. A future SQL
  *     backend can swap this for an indexed COUNT(*) or a maintained counter
@@ -37,9 +37,13 @@ import type {
   IMemberRepository,
   IActivityRepository,
   ISettingsRepository,
+  MemberCreateData,
   MemberListQuery,
+  MemberUpdateData,
   PaginatedResult,
+  PassCreateData,
   PassListQuery,
+  PassUpdateData,
 } from "../types";
 import type { Pass, Guild, Member } from "../../mock-data";
 import type { ActivityEvent } from "@/lib/activity/types";
@@ -151,39 +155,53 @@ abstract class DurableRepository {
  * - Never log sensitive data
  * - Return 404 for missing records, not errors
  * - Handle concurrent writes gracefully
+ *
+ * Multi-tenant isolation (see docs/multi-tenancy.md):
+ * - The `passes` table MUST carry a NOT NULL `guild_id` foreign key
+ * - Every statement MUST filter on it (`WHERE guild_id = $1 AND id = $2`) —
+ *   never look a record up by `id` alone and compare afterwards
+ * - `guild_id` is immutable: INSERT sets it from the scope parameter,
+ *   UPDATE must never include it in the SET clause
+ * - A scoped query that matches a record in another guild returns
+ *   null/false, identical to a missing record
+ * - Implementations must pass the isolation contract suites in
+ *   apps/dashboard/test/repositories/contracts.ts
  */
 export class DurablePassRepository extends DurableRepository implements IPassRepository {
-  async getAll(): Promise<Pass[]> {
-    // TODO: Implement against selected backend
+  async getAll(_guildId: string): Promise<Pass[]> {
+    // TODO: Implement against selected backend (SELECT ... WHERE guild_id = $1)
     throw new Error("DurablePassRepository not yet implemented. Configure STORAGE_BACKEND in .env");
   }
 
-  async query(_options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
-    // Durable backends should push search/filter/pagination into indexed queries.
+  async query(_guildId: string, _options: PassListQuery = {}): Promise<PaginatedResult<Pass>> {
+    // Durable backends should push search/filter/pagination into indexed
+    // queries; every predicate must be ANDed with guild_id = $1.
     throw new Error("DurablePassRepository not yet implemented. Configure STORAGE_BACKEND in .env");
   }
 
-  async getById(_id: string): Promise<Pass | null> {
+  async getById(_guildId: string, _id: string): Promise<Pass | null> {
+    // TODO: SELECT ... WHERE guild_id = $1 AND id = $2
     throw new Error("DurablePassRepository not yet implemented");
   }
 
-  async create(_pass: Omit<Pass, "id" | "createdAt">): Promise<Pass> {
+  async create(_guildId: string, _pass: PassCreateData): Promise<Pass> {
     // TODO: Implement with transaction support:
-    // 1. INSERT into passes table
+    // 1. INSERT into passes table with guild_id from the scope parameter
     // 2. Call this.recordDiff({}, created, "pass.created", desc, "pass", id, name)
     throw new Error("DurablePassRepository not yet implemented");
   }
 
-  async update(_id: string, _pass: Partial<Pass>): Promise<Pass | null> {
+  async update(_guildId: string, _id: string, _pass: PassUpdateData): Promise<Pass | null> {
     // TODO: Implement with optimistic locking or version column:
-    // 1. SELECT ... FOR UPDATE (or equivalent)
+    // 1. SELECT ... WHERE guild_id = $1 AND id = $2 FOR UPDATE (or equivalent)
     // 2. Call this.recordDiff(existing, updated, "pass.updated", desc, "pass", id, name)
-    // 3. UPDATE
+    // 3. UPDATE (guild_id must never appear in the SET clause)
     throw new Error("DurablePassRepository not yet implemented");
   }
 
-  async delete(_id: string): Promise<boolean> {
+  async delete(_guildId: string, _id: string): Promise<boolean> {
     // TODO: Implement soft-delete pattern for audit trail
+    // (DELETE/UPDATE ... WHERE guild_id = $1 AND id = $2)
     throw new Error("DurablePassRepository not yet implemented");
   }
 }
@@ -269,7 +287,9 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
       const existing = this.guilds.get(id);
       if (!existing) return null;
       // id is immutable; counts are derived, so ignore any attempt to set them.
-      const { memberCount: _mc, passCount: _pc, ...patch } = guild;
+      const patch: Partial<Guild> = { ...guild };
+      delete patch.memberCount;
+      delete patch.passCount;
       const updated: Guild = { ...existing, ...patch, id };
       this.guilds.set(id, updated);
       await this.recordDiff(
@@ -314,40 +334,6 @@ export class DurableGuildRepository extends DurableRepository implements IGuildR
  * - Track member status changes for audit purposes
  */
 export class DurableMemberRepository extends DurableRepository implements IMemberRepository {
-<<<<<<< HEAD
-  async getAll(): Promise<Member[]> {
-    throw new Error("DurableMemberRepository not yet implemented");
-  }
-
-  async query(_options: MemberListQuery = {}): Promise<PaginatedResult<Member>> {
-    // Durable backends should push search/filter/pagination into indexed queries.
-    throw new Error("DurableMemberRepository not yet implemented");
-  }
-
-  async getById(_id: string): Promise<Member | null> {
-    throw new Error("DurableMemberRepository not yet implemented");
-  }
-
-  async getByWallet(_wallet: string): Promise<Member | null> {
-    // High-traffic operation; should be indexed
-    throw new Error("DurableMemberRepository not yet implemented");
-  }
-
-  async create(_member: Omit<Member, "id">): Promise<Member> {
-    // TODO: Within transaction — INSERT, then this.recordDiff({}, created, "member.joined", desc, "member", id, name)
-    throw new Error("DurableMemberRepository not yet implemented");
-  }
-
-  async update(_id: string, _member: Partial<Member>): Promise<Member | null> {
-    // TODO: Within transaction — SELECT FOR UPDATE, compute diff via
-    // this.recordDiff(existing, updated, eventType, desc, "member", id, name),
-    // then UPDATE. Use member.roles_changed when roles differ, otherwise member.left.
-    throw new Error("DurableMemberRepository not yet implemented");
-  }
-
-  async delete(_id: string): Promise<boolean> {
-    throw new Error("DurableMemberRepository not yet implemented");
-=======
   private members: Map<string, Member> = new Map();
   private walletIndex: Map<string, string> = new Map();
   private nextId = 1;
@@ -401,7 +387,17 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
   async create(guildId: string, member: MemberCreateData): Promise<Member> {
     return this.writeLock.runExclusive(async () => {
       const id = String(this.nextId++);
-      const newMember: Member = { ...member, id, guildId, version: 1 };
+      const now = new Date().toISOString();
+      const newMember: Member = {
+        ...member,
+        status: member.status ?? "pending",
+        roles: member.roles ?? [],
+        joinedAt: member.joinedAt ?? now,
+        lastActive: member.lastActive ?? now,
+        id,
+        guildId,
+        version: 1,
+      };
       this.members.set(id, newMember);
       this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
 
@@ -505,7 +501,6 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
     for (let i = 0; i < members.length; i += chunkSize) {
       yield members.slice(i, i + chunkSize);
     }
->>>>>>> main
   }
 }
 
@@ -519,7 +514,7 @@ export class DurableMemberRepository extends DurableRepository implements IMembe
  * - Keep raw JSON metadata for future schema evolution
  */
 export class DurableActivityRepository extends DurableRepository implements IActivityRepository {
-  async append(_event: Omit<ActivityEvent, "id" | "timestamp"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
+  async append(_event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
     throw new Error("DurableActivityRepository not yet implemented");
   }
   async query(_options?: {

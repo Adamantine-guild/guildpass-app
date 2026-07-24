@@ -36,7 +36,7 @@ export default function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const guildCtx = useOptionalGuild();
-  const badge = session ? ROLE_BADGE[session.role] : null;
+  const badge = session?.role ? ROLE_BADGE[session.role] : null;
 
   const handleGuildChange = (nextId: string) => {
     if (!guildCtx || nextId === guildCtx.guildId) return;

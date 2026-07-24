@@ -17,6 +17,7 @@
  */
 
 import {
+  dashboardEnvBaseSchema,
   dashboardEnvSchema,
   validateEnv,
   type DashboardEnv,
@@ -25,17 +26,23 @@ import { PublicApiError } from "./api-errors";
 
 const isServer = typeof window === "undefined";
 
-let cachedEnv: DashboardEnv | null = null;
-
 /**
- * Validate `process.env` against the dashboard schema (once, then cached).
+ * Validate `process.env` against the field-level dashboard schema.
  * Server-only: throws `EnvValidationError` with an actionable message naming
- * every missing or invalid variable.
+ * every invalid variable. Validation runs on each call (it is
+ * sub-millisecond for this schema) so callers always see the current
+ * process.env — a cached snapshot would go stale in tests and in any runtime
+ * that rotates env.
+ *
+ * Plain reads use the field-level schema only: cross-field, mode-dependent
+ * requirements (live mode needs core credentials, durable mode needs
+ * DATABASE_URL) are enforced by `validateStartupEnv` and by the consumers
+ * that actually need those values (e.g. `validateLiveModeEnv`), so a
+ * misconfigured optional mode fails with a clear error at the point of use
+ * instead of breaking every unrelated env read.
  */
 function getValidatedEnv(): DashboardEnv {
-  if (cachedEnv) return cachedEnv;
-  cachedEnv = validateEnv(dashboardEnvSchema);
-  return cachedEnv;
+  return validateEnv(dashboardEnvBaseSchema);
 }
 
 /**
@@ -44,7 +51,7 @@ function getValidatedEnv(): DashboardEnv {
  * request handler. Returns the typed, validated environment.
  */
 export function validateStartupEnv(): DashboardEnv {
-  return getValidatedEnv();
+  return validateEnv(dashboardEnvSchema);
 }
 
 /**

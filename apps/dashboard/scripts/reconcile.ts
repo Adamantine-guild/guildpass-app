@@ -48,17 +48,15 @@ if (!mode) {
 
 async function defaultCountMembers(guildId: string): Promise<number> {
   const memberRepo = getMemberRepository();
-  const all = await memberRepo.getAll();
-  // In mock mode, members are global (no guildId field).
-  // In production/durable mode, filter by guildId when the schema supports it.
-  // For now, return total count as a reasonable default.
+  // Member repositories are tenant-scoped (docs/multi-tenancy.md): counts are
+  // per guild by construction.
+  const all = await memberRepo.getAll(guildId);
   return all.length;
 }
 
 async function defaultCountPasses(guildId: string): Promise<number> {
   const passRepo = getPassRepository();
-  const all = await passRepo.getAll();
-  // Same rationale as countMembers — global in mock, filterable in production.
+  const all = await passRepo.getAll(guildId);
   return all.length;
 }
 
@@ -69,7 +67,7 @@ async function main(): Promise<void> {
   console.log("═".repeat(60));
 
   const options: ReconcileOptions = {
-    mode,
+    mode: mode!,
     countMembers: defaultCountMembers,
     countPasses: defaultCountPasses,
   };

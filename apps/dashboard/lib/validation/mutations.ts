@@ -18,7 +18,9 @@ export type MemberUpdateInput = z.infer<typeof memberUpdateSchema>;
 
 const PASS_STATUSES = ["active", "inactive", "draft"] as const;
 const MEMBER_STATUSES = ["active", "inactive", "pending"] as const;
-const SERVER_OWNED_FIELDS = ["id", "createdAt"] as const;
+// guildId is server-owned: the tenant scope comes from the server-side guild
+// context, never from the payload (see docs/multi-tenancy.md).
+const SERVER_OWNED_FIELDS = ["id", "createdAt", "guildId"] as const;
 const WALLET_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -41,11 +43,12 @@ function validateServerOwnedFields(
 
 function flattenZodIssues(issues: z.ZodIssue[]): z.ZodIssue[] {
   return issues.flatMap((issue) => {
-    if (issue.code === "invalid_union") {
-      return issue.unionErrors.flatMap((error) => flattenZodIssues(error.issues));
-    }
-    if (issue.code === "invalid_union_discriminator") {
-      return issue.unionErrors.flatMap((error) => flattenZodIssues(error.issues));
+    // zod v4: an invalid_union issue carries `errors`, an array of per-option
+    // issue arrays.
+    if (issue.code === "invalid_union" && "errors" in issue && Array.isArray(issue.errors)) {
+      return (issue.errors as z.ZodIssue[][]).flatMap((optionIssues) =>
+        flattenZodIssues(optionIssues)
+      );
     }
     return issue;
   });
@@ -100,7 +103,7 @@ const optionalNonEmptyStringField = (name: string) =>
   z.string().trim().min(1, { message: `${name} must be a non-empty string` });
 
 const optionalNumberField = (name: string) =>
-  z.number({ invalid_type_error: `${name} must be a number` })
+  z.number({ error: `${name} must be a number` })
     .finite({ message: `${name} must be a number` })
     .nonnegative({ message: `${name} must be greater than or equal to 0` });
 
@@ -130,7 +133,7 @@ const optionalWalletField = z
 
 const rolesField = z
   .array(
-    z.string().refine((value) => MEMBER_ROLES.includes(value), {
+    z.string().refine((value) => (MEMBER_ROLES as readonly string[]).includes(value), {
       message: `role must be one of: ${MEMBER_ROLES.join(", ")}`,
     })
   )
@@ -144,12 +147,10 @@ export const passCreateSchema = z.object({
   currentSupply: optionalIntegerField("currentSupply").optional(),
   status: z
     .enum(PASS_STATUSES, {
-      errorMap: () => ({
-        message: `status must be one of: ${PASS_STATUSES.join(", ")}`,
-      }),
+      error: `status must be one of: ${PASS_STATUSES.join(", ")}`,
     })
     .optional(),
-}).passthrough();
+});
 
 export const passUpdateSchema = z.object({
   name: optionalNonEmptyStringField("name").optional(),
@@ -158,11 +159,9 @@ export const passUpdateSchema = z.object({
   maxSupply: z.union([optionalIntegerField("maxSupply"), z.null()]).optional(),
   currentSupply: optionalIntegerField("currentSupply").optional(),
   status: z.enum(PASS_STATUSES, {
-    errorMap: () => ({
-      message: `status must be one of: ${PASS_STATUSES.join(", ")}`,
-    }),
+    error: `status must be one of: ${PASS_STATUSES.join(", ")}`,
   }).optional(),
-}).passthrough();
+});
 
 export const memberCreateSchema = z.object({
   name: requiredStringField("name"),
@@ -170,29 +169,25 @@ export const memberCreateSchema = z.object({
   roles: rolesField,
   status: z
     .enum(MEMBER_STATUSES, {
-      errorMap: () => ({
-        message: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
-      }),
+      error: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
     })
     .optional(),
   joinedAt: isoDateField("joinedAt").optional(),
   lastActive: isoDateField("lastActive").optional(),
-}).passthrough();
+});
 
 export const memberUpdateSchema = z.object({
   name: optionalNonEmptyStringField("name").optional(),
   wallet: optionalWalletField.optional(),
   roles: rolesField,
   status: z.enum(MEMBER_STATUSES, {
-    errorMap: () => ({
-      message: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
-    }),
+    error: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
   }).optional(),
   joinedAt: isoDateField("joinedAt").optional(),
   lastActive: isoDateField("lastActive").optional(),
   /** Expected version for optimistic concurrency control. */
   version: z.number().int().positive().optional(),
-}).passthrough();
+});
 
 export function malformedPayloadError(): FieldValidationError[] {
   return [{ field: "body", message: "Request body must be a valid JSON object" }];
@@ -428,12 +423,21 @@ export function validateMemberUpdatePayload(payload: unknown): ValidationResult<
     `status must be one of: ${MEMBER_STATUSES.join(", ")}`
   );
 
+  const version = parseField(
+    memberUpdateSchema.shape.version,
+    payload.version,
+    "version",
+    errors,
+    "version must be a positive integer"
+  );
+
   if (name !== undefined) data.name = name;
   if (wallet !== undefined) data.wallet = normalizedWallet ?? wallet;
   if (roles !== undefined) data.roles = roles ? [...new Set(roles)] : [];
   if (joinedAt !== undefined) data.joinedAt = joinedAt;
   if (lastActive !== undefined) data.lastActive = lastActive;
   if (status !== undefined) data.status = status;
+  if (version !== undefined) data.version = version;
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data };

@@ -144,7 +144,7 @@ function validPayload(overrides: Record<string, unknown> = {}): string {
     id: "evt_val_1",
     type: "membership.created",
     created: Math.floor(Date.now() / 1000),
-    data: { wallet: "0xabc", name: "Bob" },
+    data: { wallet: "0x742d35cC6634c0532925a3B8879539d43374E290", name: "Bob" },
     ...overrides,
   });
 }

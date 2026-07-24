@@ -7,10 +7,6 @@
  * server-side if added later (see issue #80 notes).
  */
 
-<<<<<<< HEAD
-=======
-import { SUPPORTED_TIMEZONES } from "@/lib/timezones";
-
 export const SECRET_MASK = "••••••••";
 
 export interface WriteOnlySecret {
@@ -19,7 +15,6 @@ export interface WriteOnlySecret {
   readonly __secretBrand?: never;
 }
 
->>>>>>> main
 export interface DashboardSettings {
   /** Display name of the workspace. */
   workspaceName: string;
@@ -29,6 +24,12 @@ export interface DashboardSettings {
   displayName: string;
   /** Contact email for the workspace profile. */
   email: string;
+  /**
+   * Write-only secret, never readable in plaintext. Present on reads only as
+   * a set/unset flag with a masked value; writes go through the settings
+   * patch flow and are stored encrypted (see DurableSettingsRepository).
+   */
+  webhookForwardingSecret?: WriteOnlySecret;
 }
 
 /**

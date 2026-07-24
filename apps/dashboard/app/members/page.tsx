@@ -25,7 +25,8 @@ import {
   invalidateAfterMutation,
   queryKeys,
 } from "@/lib/cache/query-cache";
-import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";`nimport { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 
 type ListState = "loading" | "loaded" | "unsupported" | "error";
@@ -107,19 +108,39 @@ export default function MembersPage() {
 
       if (updates.search !== undefined) {
         const value = updates.search.trim();
-        value ? next.set("search", value) : next.delete("search");
+        if (value) {
+          next.set("search", value);
+        } else {
+          next.delete("search");
+        }
       }
       if (updates.status !== undefined) {
-        updates.status === "all" ? next.delete("status") : next.set("status", updates.status);
+        if (updates.status === "all") {
+          next.delete("status");
+        } else {
+          next.set("status", updates.status);
+        }
       }
       if (updates.role !== undefined) {
-        updates.role === "all" ? next.delete("role") : next.set("role", updates.role);
+        if (updates.role === "all") {
+          next.delete("role");
+        } else {
+          next.set("role", updates.role);
+        }
       }
       if (updates.guild !== undefined) {
-        updates.guild ? next.set("guild", updates.guild) : next.delete("guild");
+        if (updates.guild) {
+          next.set("guild", updates.guild);
+        } else {
+          next.delete("guild");
+        }
       }
       if (updates.page !== undefined) {
-        updates.page && updates.page > 1 ? next.set("page", String(updates.page)) : next.delete("page");
+        if (updates.page && updates.page > 1) {
+          next.set("page", String(updates.page));
+        } else {
+          next.delete("page");
+        }
       }
 
       const query = next.toString();

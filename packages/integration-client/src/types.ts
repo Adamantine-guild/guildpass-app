@@ -53,6 +53,31 @@ export type ActivityEventEntity = {
 };
 
 /**
+ * A single field-level change captured in an audit diff
+ * (before/after snapshot of one top-level field).
+ */
+export type ActivityChange = {
+  field: string;
+  before?: unknown;
+  after?: unknown;
+};
+
+/**
+ * Field names that must never appear in audit diffs. These are write-only
+ * secrets: capturing their before/after values in an activity event would
+ * leak them into the (readable) audit trail.
+ */
+export const SENSITIVE_AUDIT_FIELDS: ReadonlySet<string> = new Set([
+  "apiKey",
+  "clientSecret",
+  "password",
+  "privateKey",
+  "secret",
+  "token",
+  "webhookSecret",
+]);
+
+/**
  * The current schema version for ActivityEvent.
  * Bump this when adding/removing/renaming fields on ActivityEvent.
  */
@@ -72,6 +97,8 @@ export type ActivityEvent = {
   description: string;
   entity?: ActivityEventEntity;
   metadata?: Record<string, any>;
+  /** Field-level audit diff for mutation events. */
+  changes?: ActivityChange[];
   /**
    * Explicit schema version for backward-compatible migration.
    * Legacy events stored without this field are treated as version 1.

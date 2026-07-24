@@ -16,6 +16,7 @@ import type { IMemberRepository, IPassRepository } from "../lib/repositories/typ
 function fakeMemberRepo(members: Member[]): IMemberRepository {
   return {
     async getAll() { return members; },
+    async *streamAll() { yield members; },
     async query() { throw new Error("not used"); },
     async getById() { return null; },
     async getByWallet() { return null; },

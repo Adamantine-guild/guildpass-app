@@ -13,7 +13,9 @@ import {
 } from "@guildpass/integration-client";
 import type { ActivityChange } from "@guildpass/integration-client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useGuild } from "@/lib/guild/GuildProvider";`nimport { usePathname, useRouter, useSearchParams } from "next/navigation";`nimport type { ActivitySortOrder } from "@/lib/activity/query";
+import { useGuild } from "@/lib/guild/GuildProvider";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { ActivitySortOrder } from "@/lib/activity/query";
 
 const TYPE_ICON: Record<ActivityEventType, string> = {
   "member.joined": "👤",
@@ -95,7 +97,17 @@ function readLimit(value: string | null): number {
   return PAGE_SIZE_OPTIONS.includes(parsed as (typeof PAGE_SIZE_OPTIONS)[number]) ? parsed : 10;
 }
 export default function ActivityPage() {
-  const { guildId, guild } = useGuild();`n  const router = useRouter();`n  const pathname = usePathname();`n  const searchParams = useSearchParams();`n  const [type, setType] = useState<ActivityEventType | "">(() => (searchParams.get("type") as ActivityEventType | null) ?? "");`n  const [source, setSource] = useState<ActivityEventSource | "">(() => (searchParams.get("source") as ActivityEventSource | null) ?? "");`n  const [severity, setSeverity] = useState<ActivityEventSeverity | "">(() => (searchParams.get("severity") as ActivityEventSeverity | null) ?? "");`n  const [actor, setActor] = useState(() => searchParams.get("actor") ?? "");`n  const [from, setFrom] = useState(() => searchParams.get("from") ?? "");`n  const [sort, setSort] = useState<ActivitySortOrder>(() => readSort(searchParams.get("sort")));`n  const [limit, setLimit] = useState(() => readLimit(searchParams.get("limit")));
+  const { guildId, guild } = useGuild();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [type, setType] = useState<ActivityEventType | "">(() => (searchParams.get("type") as ActivityEventType | null) ?? "");
+  const [source, setSource] = useState<ActivityEventSource | "">(() => (searchParams.get("source") as ActivityEventSource | null) ?? "");
+  const [severity, setSeverity] = useState<ActivityEventSeverity | "">(() => (searchParams.get("severity") as ActivityEventSeverity | null) ?? "");
+  const [actor, setActor] = useState(() => searchParams.get("actor") ?? "");
+  const [from, setFrom] = useState(() => searchParams.get("from") ?? "");
+  const [sort, setSort] = useState<ActivitySortOrder>(() => readSort(searchParams.get("sort")));
+  const [limit, setLimit] = useState(() => readLimit(searchParams.get("limit")));
   const { intervalMs } = getActivityRefreshConfig();
   const updateActivityQuery = useCallback(
     (updates: {
@@ -109,7 +121,12 @@ export default function ActivityPage() {
     }) => {
       const next = new URLSearchParams(searchParams.toString());
       const setOrDelete = (key: string, value: string) => {
-        value.trim() ? next.set(key, value.trim()) : next.delete(key);
+        const trimmed = value.trim();
+        if (trimmed) {
+          next.set(key, trimmed);
+        } else {
+          next.delete(key);
+        }
       };
 
       if (updates.type !== undefined) setOrDelete("type", updates.type);
@@ -118,10 +135,18 @@ export default function ActivityPage() {
       if (updates.actor !== undefined) setOrDelete("actor", updates.actor);
       if (updates.from !== undefined) setOrDelete("from", updates.from);
       if (updates.sort !== undefined) {
-        updates.sort === "newest" ? next.delete("sort") : next.set("sort", updates.sort);
+        if (updates.sort === "newest") {
+          next.delete("sort");
+        } else {
+          next.set("sort", updates.sort);
+        }
       }
       if (updates.limit !== undefined) {
-        updates.limit === 10 ? next.delete("limit") : next.set("limit", String(updates.limit));
+        if (updates.limit === 10) {
+          next.delete("limit");
+        } else {
+          next.set("limit", String(updates.limit));
+        }
       }
 
       const query = next.toString();
@@ -171,7 +196,8 @@ export default function ActivityPage() {
     source: source || undefined,
     severity: severity || undefined,
     actor: actor.trim() || undefined,
-    from: fromIso,`n    sort,
+    from: fromIso,
+    sort,
     autoRefresh: true,
     simulate: false,
     guildId,
@@ -184,7 +210,11 @@ export default function ActivityPage() {
     setSource("");
     setSeverity("");
     setActor("");
-    setFrom("");`n    setSort("newest");`n    setLimit(10);`n    updateActivityQuery({ type: "", source: "", severity: "", actor: "", from: "", sort: "newest", limit: 10 });`n  };
+    setFrom("");
+    setSort("newest");
+    setLimit(10);
+    updateActivityQuery({ type: "", source: "", severity: "", actor: "", from: "", sort: "newest", limit: 10 });
+  };
 
   return (
     <DashboardLayout

@@ -85,7 +85,7 @@ describe("handleApiError — internal error leakage", () => {
 
   test("a PermissionDeniedError is treated as a client-safe 403", async () => {
     const response = await handleApiError(async () => {
-      throw new PermissionDeniedError("members:write");
+      throw new PermissionDeniedError("members:write", "1");
     });
     const body = await response.json();
 

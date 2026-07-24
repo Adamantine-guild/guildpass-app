@@ -5,6 +5,8 @@ import { GUILD_ID_HEADER } from "./guild-context";
 
 export interface Pass {
   id: string;
+  /** Owning guild (tenant). Every pass belongs to exactly one guild. */
+  guildId: string;
   name: string;
   description: string;
   status: "active" | "inactive" | "draft";
@@ -25,6 +27,8 @@ export interface Guild {
 
 export interface Member {
   id: string;
+  /** Owning guild (tenant). Every member record belongs to exactly one guild. */
+  guildId: string;
   wallet: string;
   name: string;
   status: "active" | "inactive" | "pending";
@@ -46,13 +50,6 @@ export interface Activity {
   changes?: ActivityChange[];
 }
 
-<<<<<<< HEAD
-export const mockPasses: Pass[] = [
-  { id: "1", name: "Founder Pass", description: "Exclusive early access pass for founding members", status: "active", price: 0.1, maxSupply: 100, currentSupply: 42, createdAt: "2025-01-15T00:00:00Z" },
-  { id: "2", name: "Premium Pass", description: "Full access to all guild features", status: "active", price: 0.05, maxSupply: 500, currentSupply: 189, createdAt: "2025-02-20T00:00:00Z" },
-  { id: "3", name: "Community Pass", description: "Basic community access", status: "active", price: 0, maxSupply: null, currentSupply: 1203, createdAt: "2025-01-01T00:00:00Z" },
-  { id: "4", name: "VIP Pass", description: "Top-tier VIP membership", status: "draft", price: 1, maxSupply: 50, currentSupply: 0, createdAt: "2025-06-01T00:00:00Z" },
-=======
 /**
  * Default guild used when no tenant scope is supplied (header / cookie / route).
  * Not a hard-coded product assumption — only a fallback for unscoped requests.
@@ -84,7 +81,6 @@ export const mockGuilds: Guild[] = [
     passCount: 3,
     createdAt: "2025-03-05T00:00:00Z",
   },
->>>>>>> main
 ];
 
 export const mockPasses: Pass[] = [
@@ -204,16 +200,11 @@ export const mockPasses: Pass[] = [
 ];
 
 export const mockMembers: Member[] = [
-<<<<<<< HEAD
-  { id: "1", wallet: "0x742d35Cc6634C0532925a3b8879539d43374e290", name: "Alice", status: "active", roles: ["admin", "member"], joinedAt: "2024-12-01T00:00:00Z", lastActive: "2025-06-10T12:34:56Z" },
-  { id: "2", wallet: "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1", name: "Bob", status: "active", roles: ["member", "contributor"], joinedAt: "2025-01-05T00:00:00Z", lastActive: "2025-06-11T08:23:45Z" },
-  { id: "3", wallet: "0xFFcf8Ff64036412b493244b40b914f562419246F", name: "Charlie", status: "pending", roles: [], joinedAt: "2025-06-12T00:00:00Z", lastActive: "2025-06-12T09:15:22Z" },
-  { id: "4", wallet: "0x1234567890123456789012345678901234567890", name: "Diana", status: "inactive", roles: ["member"], joinedAt: "2025-02-14T00:00:00Z", lastActive: "2025-04-20T14:30:00Z" },
-=======
   // Guild 1
   {
     id: "1",
     guildId: "1",
+    version: 1,
     wallet: "0x742d35Cc6634C0532925a3b8879539d43374e290",
     name: "Alice",
     status: "active",
@@ -224,6 +215,7 @@ export const mockMembers: Member[] = [
   {
     id: "2",
     guildId: "1",
+    version: 1,
     wallet: "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1",
     name: "Bob",
     status: "active",
@@ -234,6 +226,7 @@ export const mockMembers: Member[] = [
   {
     id: "3",
     guildId: "1",
+    version: 1,
     wallet: "0xFFcf8Ff64036412b493244b40b914f562419246F",
     name: "Charlie",
     status: "pending",
@@ -244,6 +237,7 @@ export const mockMembers: Member[] = [
   {
     id: "4",
     guildId: "1",
+    version: 1,
     wallet: "0x1234567890123456789012345678901234567890",
     name: "Diana",
     status: "inactive",
@@ -255,6 +249,7 @@ export const mockMembers: Member[] = [
   {
     id: "5",
     guildId: "2",
+    version: 1,
     wallet: "0x1111111111111111111111111111111111111111",
     name: "Eve",
     status: "active",
@@ -265,6 +260,7 @@ export const mockMembers: Member[] = [
   {
     id: "6",
     guildId: "2",
+    version: 1,
     wallet: "0x2222222222222222222222222222222222222222",
     name: "Frank",
     status: "active",
@@ -275,6 +271,7 @@ export const mockMembers: Member[] = [
   {
     id: "7",
     guildId: "2",
+    version: 1,
     wallet: "0x3333333333333333333333333333333333333333",
     name: "Grace",
     status: "pending",
@@ -286,6 +283,7 @@ export const mockMembers: Member[] = [
   {
     id: "8",
     guildId: "3",
+    version: 1,
     wallet: "0x4444444444444444444444444444444444444444",
     name: "Hank",
     status: "active",
@@ -296,6 +294,7 @@ export const mockMembers: Member[] = [
   {
     id: "9",
     guildId: "3",
+    version: 1,
     wallet: "0x5555555555555555555555555555555555555555",
     name: "Ivy",
     status: "active",
@@ -306,6 +305,7 @@ export const mockMembers: Member[] = [
   {
     id: "10",
     guildId: "3",
+    version: 1,
     wallet: "0x6666666666666666666666666666666666666666",
     name: "Jack",
     status: "inactive",
@@ -313,7 +313,6 @@ export const mockMembers: Member[] = [
     joinedAt: "2025-04-02T00:00:00Z",
     lastActive: "2025-05-01T08:00:00Z",
   },
->>>>>>> main
 ];
 
 export const mockActivity: Activity[] = [
