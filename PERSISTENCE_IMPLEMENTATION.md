@@ -23,10 +23,10 @@ A **repository pattern** abstraction layer that enables seamless data persistenc
 - Perfect for local development—zero external dependencies
 
 #### 3. **Durable Adapters** (`lib/repositories/adapters/durable.ts`)
-- Contract/interface definitions for production backends
-- Intentionally vendor-agnostic (PostgreSQL, MongoDB, DynamoDB, etc.)
-- Stub implementations with comprehensive documentation
-- Ready for you to implement against your chosen database
+- Fully implemented PostgreSQL backend using `pg` driver.
+- Real SQL CRUD operations scoped by `guild_id` for multi-tenant isolation.
+- Automatic fallback to in-memory map-based storage if connection string is "mock://conn" (for unit test compatibility).
+- Database migration support via SQL script and custom node:test integration.
 
 #### 4. **Factory Pattern** (`lib/repositories/factory.ts`)
 - Singleton pattern—reuses instances within a process

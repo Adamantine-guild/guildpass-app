@@ -1,6 +1,10 @@
 /**
  * Repository factory: selects and instantiates repositories based on storage mode.
  * This is the single point of configuration for all data persistence.
+ *
+ * Durable mode: all repositories share a single pg.Pool created lazily in
+ * `lib/db.ts`. The connection string passed to each constructor is retained
+ * for API compatibility but the adapters route all queries through the pool.
  */
 
 import type { IRepositoryFactory, IPassRepository, IGuildRepository, IMemberRepository, IActivityRepository, ISettingsRepository } from "./types";

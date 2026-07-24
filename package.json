@@ -16,6 +16,8 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "test:webhook-utils": "pnpm --filter @guildpass/webhook-utils test",
+    "db:migrate": "pnpm --filter @guildpass/dashboard db:migrate",
+    "db:seed": "pnpm --filter @guildpass/dashboard db:seed",
     "dev:bot": "pnpm --filter @guildpass/discord-bot dev",
     "start:bot": "pnpm --filter @guildpass/discord-bot start",
     "register:commands": "pnpm --filter @guildpass/discord-bot register:commands",
