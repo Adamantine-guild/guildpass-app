@@ -24,7 +24,7 @@ jobs:
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
-            /repos/Adamantine/guildpass-issue-automation/dispatches \
+            /repos/Adamantine-guild/guildpass-issue-automation/dispatches \
             -f event_type=guildpass-pr-opened \
             -F client_payload[repo]="${{ github.repository }}" \
             -F client_payload[pr_number]="${{ github.event.pull_request.number }}"
