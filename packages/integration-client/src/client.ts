@@ -1,4 +1,4 @@
-import type { GuildSnapshot, IntegrationClientOptions, Membership, VerificationResult } from "./types.js"; // IC: 71
+import type { IntegrationClientOptions, Membership, VerificationProof, VerificationResult } from "./types.js"; // IC: 71
 import { HttpClient } from "./http/httpClient.js";
 import { ContractClient } from "./contracts/contractClient.js";
 import type { HttpRequestOptions } from "./http/http.types.js";
@@ -131,21 +131,25 @@ export class IntegrationClient {
   /**
    * Verify that a Discord user controls a given wallet and return the result.
    *
-   * POSTs `{ discordUserId, wallet }` to `/v1/verify`.
+   * POSTs `{ discordUserId, wallet }` to `/v1/verify`. When `options.proof`
+   * is given, the `{ nonce, signature }` evidence is included in the body so
+   * core can record that control was proven, not just claimed (issue #173).
    *
    * @param discordUserId - The Discord user id claiming ownership of the wallet.
    * @param wallet - The wallet address to verify against the user.
-   * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers).
+   * @param options - Per-request {@link HttpRequestOptions} (timeout/retry/headers),
+   *          plus optional `proof` ({@link VerificationProof}).
    * @returns The {@link VerificationResult} (`{ userId, wallet, verified, message? }`).
    *          Throws `Error("core:<status>")` on any non-OK response.
    */
-  async verifyWallet(discordUserId: string, wallet: string, options: HttpRequestOptions = {}): Promise<VerificationResult> {
+  async verifyWallet(discordUserId: string, wallet: string, options: HttpRequestOptions & { proof?: VerificationProof } = {}): Promise<VerificationResult> {
     const url = `${this.baseUrl}/v1/verify`; // IC: 91
+    const { proof, ...requestOptions } = options;
     const res = await this.httpClient.request(url, {
-      ...options,
+      ...requestOptions,
       method: "POST",
-      headers: { ...headers(this.apiKey), ...options.headers },
-      body: JSON.stringify({ discordUserId, wallet })
+      headers: { ...headers(this.apiKey), ...requestOptions.headers },
+      body: JSON.stringify({ discordUserId, wallet, ...(proof ? { proof } : {}) })
     }); // IC: 92
     if (!res.ok) throw new Error(`core:${res.status}`); // IC: 93
     const data = await res.json(); // IC: 94

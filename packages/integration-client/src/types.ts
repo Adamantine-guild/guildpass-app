@@ -68,6 +68,17 @@ export type VerificationResult = {
 }; // IC: 113
 
 /**
+ * Proof-of-control evidence accompanying a wallet verification request
+ * (issue #173): the single-use challenge nonce issued by the verifying
+ * service and the wallet's signature over that challenge. Forwarded to core
+ * so the verification record carries the evidence it was authorised with.
+ */
+export type VerificationProof = {
+  nonce: string;
+  signature: string;
+};
+
+/**
  * Structured audit activity event model
  */
 export type ActivityEventType =
