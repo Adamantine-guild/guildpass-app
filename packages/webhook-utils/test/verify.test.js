@@ -170,6 +170,16 @@ describe("verifySignature", () => {
         payload: PAYLOAD,
         timestamp: futureTimestamp,
       });
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error.includes("future"));
+    });
 
     test("should accept future timestamp within tolerance", () => {
       const futureTimestamp = Math.floor(Date.now() / 1000) + 120;
@@ -189,16 +199,7 @@ describe("verifySignature", () => {
       assert.strictEqual(result.valid, true);
       assert.strictEqual(result.timestamp, futureTimestamp);
     });
-      const result = verifySignature({
-        signatureHeader: signature,
-        secret: SECRET,
-        payload: PAYLOAD,
-        tolerance: 300,
-      });
-
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error.includes("future"));
-    });
+      
 
     test("should accept timestamp within tolerance", () => {
       const recentTimestamp = Math.floor(Date.now() / 1000) - 200; // 200 seconds ago
@@ -310,6 +311,37 @@ describe("verifySignature", () => {
 
       assert.strictEqual(result.valid, false);
       assert.strictEqual(result.error, "Invalid signature");
+    });
+  
+    test("should reject header containing only whitespace", () => {
+      const result = verifySignature({
+        signatureHeader: "   ",
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.error, "Invalid or missing timestamp in signature");
+    });
+
+    test("should reject header with trailing or leading malformed commas", () => {
+      const result = verifySignature({
+        signatureHeader: ",,,",
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should reject header with float/decimal timestamp", () => {
+      const result = verifySignature({
+        signatureHeader: "t=12345.678,v1=abc123",
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
     });
   });
 
