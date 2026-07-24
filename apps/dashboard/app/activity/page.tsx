@@ -70,6 +70,7 @@ const SOURCE_FILTERS: { label: string; value: ActivityEventSource | "" }[] = [
   { label: "Dashboard", value: "dashboard" },
   { label: "Webhook", value: "webhook" },
   { label: "Core API", value: "core_api" },
+  { label: "Reconciliation", value: "reconciliation" },
 ];
 
 const SEVERITY_FILTERS: { label: string; value: ActivityEventSeverity | "" }[] = [
@@ -395,7 +396,7 @@ export default function ActivityPage() {
                         >
                           {formatRelativeTime(activity.timestamp)}
                         </span>
-                        <span className={`rounded-full px-2 py-1 text-xs ${activity.source === "webhook" ? "bg-indigo-50 text-indigo-700" : "bg-slate-100 text-slate-700"}`}>
+                        <span className={`rounded-full px-2 py-1 text-xs ${activity.source === "webhook" ? "bg-indigo-50 text-indigo-700" : activity.source === "reconciliation" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700"}`}>
                           {activity.source}
                         </span>
                         <span className={`rounded-full px-2 py-1 text-xs ${activity.severity === "error" || activity.severity === "critical" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
