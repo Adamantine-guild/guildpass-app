@@ -171,7 +171,7 @@ export class BackfillLock {
   /** Returns all currently-held (possibly stale) locks. */
   async listLocks(): Promise<LockInfo[]> {
     const rows = await this.prisma.backfillLock.findMany();
-    return rows.map((r) => ({
+    return rows.map((r: { holder: string; acquiredAt: Date; liveHead: Date | null }) => ({
       holder: r.holder as LockHolder,
       acquiredAt: r.acquiredAt,
       liveHead: r.liveHead ?? undefined,

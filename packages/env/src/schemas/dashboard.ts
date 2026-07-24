@@ -44,7 +44,7 @@ export const dashboardEnvBaseSchema = z
 
     // ── Activity feed ────────────────────────────────────────────────
     ACTIVITY_STORAGE_MODE: z
-      .enum(["memory", "file"])
+      .enum(["memory", "file", "durable"])
       .default("memory"),
     ACTIVITY_STORAGE_DIR: z.string().default(".guildpass-activity"),
     NEXT_PUBLIC_ACTIVITY_REFRESH_MS: z

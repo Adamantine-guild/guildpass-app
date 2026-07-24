@@ -8,8 +8,9 @@ export function formatWalletAddress(
   }
 
   const trimmed = address.trim();
+  const prefixOffset = trimmed.startsWith("0x") ? 2 : 0;
 
-  if (trimmed.length <= prefixLength + suffixLength) {
+  if (trimmed.length <= prefixLength + suffixLength + prefixOffset) {
     return trimmed;
   }
 

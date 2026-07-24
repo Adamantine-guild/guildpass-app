@@ -151,8 +151,8 @@ async function getSigningKey(): Promise<CryptoKey> {
 
 // ── Token encoding / decoding ──────────────────────────────────────────────
 
-function base64UrlEncode(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+function base64UrlEncode(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
@@ -200,12 +200,16 @@ async function verifyAccessToken(token: string): Promise<AccessTokenPayload | nu
     const encoder = new TextEncoder();
 
     const signingInput = `${headerB64}.${payloadB64}`;
-    const signature = base64UrlDecode(signatureB64);
+    const signatureBytes = base64UrlDecode(signatureB64);
+    const signatureBuffer = signatureBytes.buffer.slice(
+      signatureBytes.byteOffset,
+      signatureBytes.byteOffset + signatureBytes.byteLength,
+    ) as ArrayBuffer;
 
     const valid = await crypto.subtle.verify(
       "HMAC",
       key,
-      signature,
+      signatureBuffer,
       encoder.encode(signingInput),
     );
 

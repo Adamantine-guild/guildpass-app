@@ -331,22 +331,17 @@ test("Repository Factory: Clear repositories", async () => {
   assert.ok(allPasses.some((p) => p.name === "After clear"), "Should have new pass");
 });
 
-test("Repository Factory: Error handling in durable mode stub", async () => {
-  // This test validates that durable adapters throw appropriate errors
-  // when not yet implemented
-
+test("Repository Factory: durable mode instantiates durable repositories", async () => {
   process.env.DASHBOARD_STORAGE_MODE = "durable";
   process.env.DATABASE_URL = "postgresql://localhost/test";
 
   clearRepositories();
 
-  try {
-    const repo = getPassRepository();
-    await repo.getAll(GUILD);
-    assert.fail("Should throw 'not yet implemented'");
-  } catch (error: any) {
-    assert.ok(error.message.includes("not yet implemented"), "Durable adapter should throw informative error");
-  }
+  const factory = getRepositoryFactory();
+  const repo = factory.passRepository();
+
+  assert.ok(repo, "Durable pass repository should be created");
+  assert.equal(typeof repo.getAll, "function", "Durable repository should expose the standard API");
 
   // Reset to mock
   process.env.DASHBOARD_STORAGE_MODE = "mock";
