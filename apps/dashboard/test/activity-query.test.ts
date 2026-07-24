@@ -79,6 +79,13 @@ describe("activity query contract", () => {
       limit: 10,
     });
 
+    assert.deepEqual(
+      result.events.map((event) => event.id),
+      ["evt_query_002"]
+    );
+    assert.equal(result.nextCursor, null);
+  });
+
   test("sorts oldest first when requested", () => {
     const result = filterActivityEvents(events, { limit: 3, sort: "oldest" });
 
@@ -87,12 +94,6 @@ describe("activity query contract", () => {
       ["evt_query_001", "evt_query_002", "evt_query_003"]
     );
     assert.equal(result.nextCursor, "evt_query_003");
-  });
-    assert.deepEqual(
-      result.events.map((event) => event.id),
-      ["evt_query_002"]
-    );
-    assert.equal(result.nextCursor, null);
   });
 
   test("returns an empty page for valid filters with no matches", () => {
