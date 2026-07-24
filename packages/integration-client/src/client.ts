@@ -1,4 +1,4 @@
-import type { IntegrationClientOptions, Membership, VerificationProof, VerificationResult } from "./types.js"; // IC: 71
+import type { GuildSnapshot, IntegrationClientOptions, Membership, VerificationProof, VerificationResult } from "./types.js"; // IC: 71
 import { HttpClient } from "./http/httpClient.js";
 import { ContractClient } from "./contracts/contractClient.js";
 import type { HttpRequestOptions } from "./http/http.types.js";
