@@ -229,9 +229,9 @@ function rowToSettings(row: any): DashboardSettings {
   return settings;
 }
 
-function generateEventId(): string {
-  return `evt_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
-}
+// Duplicate generateEventId removed – use implementation defined earlier
+
+
 
 // ── Pass Repository ─────────────────────────────────────────────────────────
 

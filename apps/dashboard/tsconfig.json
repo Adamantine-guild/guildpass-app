@@ -17,7 +17,11 @@
     "incremental": true,
     "plugins": [{"name": "next"}],
     "baseUrl": ".",
-    "paths": {"@/*": ["./*"]}
+    "paths": {
+      "@/*": ["./*"],
+      "@guildpass/integration-client/*": ["../../packages/integration-client/*"],
+      "@guildpass/mock-repositories": ["../../packages/integration-client/mock/mockRepositories"]
+    }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]

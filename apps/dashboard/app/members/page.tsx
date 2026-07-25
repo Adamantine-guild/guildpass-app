@@ -16,7 +16,7 @@ import { toMembersCsv } from "@/lib/members-csv";
 import type { Member as MockMember } from "@/lib/mock-data";
 import { canManageMembers } from "@/lib/permissions";
 import type { PaginatedResult } from "@/lib/repositories/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGuild } from "@/lib/guild/GuildProvider";
 import { guildFetch } from "@/lib/guild/api";
 import { getMembersForGuild } from "@/lib/data/guild-scoped";
@@ -61,7 +61,7 @@ function readPageFilter(value: string | null): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
 }
 
-export default function MembersPage() {
+function MembersPageContent() {
   const session = useSession();
   const canWrite = canManageMembers(session, session.activeGuildId);
   const apiMode = getClientApiMode();
@@ -595,4 +595,12 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [delayMs, value]);
 
   return debounced;
+}
+
+export default function MembersPage() {
+  return (
+    <Suspense fallback={<div>Loading members...</div>}>
+      <MembersPageContent />
+    </Suspense>
+  );
 }
