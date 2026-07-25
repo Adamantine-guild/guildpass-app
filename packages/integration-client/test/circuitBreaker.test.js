@@ -81,8 +81,8 @@ describe("HttpClient + circuit breaker (integration)", () => {
       circuitBreaker: { failureThreshold: 2, cooldownMs: 10000 },
     });
 
-    await client.request("http://x");
-    await client.request("http://x");
+    await client.request("http://x").catch(() => {});
+    await client.request("http://x").catch(() => {});
     assert.strictEqual(fetchCalls, 2);
 
     await assert.rejects(

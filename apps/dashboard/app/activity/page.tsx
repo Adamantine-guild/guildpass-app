@@ -12,7 +12,7 @@ import {
   type ActivityEventType,
 } from "@guildpass/integration-client";
 import type { ActivityChange } from "@guildpass/integration-client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useGuild } from "@/lib/guild/GuildProvider";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ActivitySortOrder } from "@/lib/activity/query";
@@ -97,7 +97,7 @@ function readLimit(value: string | null): number {
   const parsed = Number(value);
   return PAGE_SIZE_OPTIONS.includes(parsed as (typeof PAGE_SIZE_OPTIONS)[number]) ? parsed : 10;
 }
-export default function ActivityPage() {
+function ActivityPageContent() {
   const { guildId, guild } = useGuild();
   const router = useRouter();
   const pathname = usePathname();
@@ -471,5 +471,13 @@ function DiffRow({ change }: { change: ActivityChange }) {
         </span>
       </div>
     </div>
+  );
+}
+
+export default function ActivityPage() {
+  return (
+    <Suspense fallback={<div>Loading activity...</div>}>
+      <ActivityPageContent />
+    </Suspense>
   );
 }

@@ -22,7 +22,7 @@
  *   – Token comparison is constant-time to prevent timing attacks.
  */
 
-import { timingSafeEqual, randomBytes } from "node:crypto";
+import { timingSafeEqual, randomBytes } from "crypto";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

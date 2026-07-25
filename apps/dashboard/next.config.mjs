@@ -42,7 +42,7 @@ const nextConfig = {
 
   // Exclude health check from the build output (it's a serverless function)
   // and ensure it's not statically generated
-  serverExternalPackages: [],
+  // serverExternalPackages removed
 };
 
 export default nextConfig;

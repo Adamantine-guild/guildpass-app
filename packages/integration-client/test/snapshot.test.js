@@ -58,8 +58,8 @@ describe("IntegrationClient.getGuildSnapshot", () => {
     assert.strictEqual(result, null);
   });
 
-  test("throws core:<status> on other non-OK responses", async () => {
+  test("throws UpstreamError on other non-OK responses", async () => {
     const client = clientWithFetch(async () => jsonResponse(500, { error: "boom" }));
-    await assert.rejects(() => client.getGuildSnapshot("guild-1"), /core:500/);
+    await assert.rejects(() => client.getGuildSnapshot("guild-1"), /Upstream responded with 500/);
   });
 });

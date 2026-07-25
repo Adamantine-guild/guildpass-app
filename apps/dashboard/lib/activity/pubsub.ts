@@ -42,6 +42,7 @@ import type { ActivityEvent } from "./types";
 import { getPool } from "../db";
 import { getStorageMode, getStorageConfig } from "../env";
 
+import { PoolClient } from "pg";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type ActivitySubscriber = (event: ActivityEvent) => void;
@@ -106,9 +107,7 @@ class LocalPubSubImpl implements ILocalPubSub {
 
 class PostgresPubSubImpl implements ILocalPubSub {
   private listeners = new Map<string, Set<ActivitySubscriber>>();
-  private pgListenerClient: Awaited<
-    ReturnType<ReturnType<typeof getPool>["connect"]>
-  > | null = null;
+  private pgListenerClient: PoolClient | null = null;
   private listenerRefCount = 0;
   private connectionError: Error | null = null;
 

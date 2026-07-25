@@ -78,9 +78,14 @@ export class HttpClient {
           return response;
         }
 
+        // Treat 404 as a non-error response; return it for caller to handle.
+        if (response.status === 404) {
+          // Do not record circuit breaker failure for 404.
+          return response;
+        }
+
         // Non-OK response: check if we should retry (transient) or fail.
         if (attempt >= maxAttempts || !this.isTransient(response.status)) {
-          if (this.breaker) this.breaker.recordFailure();
           throw new UpstreamError(response.status, response.statusText);
         }
 
