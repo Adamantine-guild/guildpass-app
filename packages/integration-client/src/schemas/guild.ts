@@ -5,16 +5,19 @@ export const guildSchema = z.object({
     .string()
     .min(1, { message: "Guild name is required" })
     .trim(),
+
   description: z
     .string()
     .max(500, { message: "Description cannot exceed 500 characters" })
     .trim(),
+
   memberCount: z
     .number()
     .int({ message: "Member cap must be an integer" })
     .positive({ message: "Member cap must be a positive number" })
     .optional()
     .default(0),
+
   passCount: z
     .number()
     .int()
