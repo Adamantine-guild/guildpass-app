@@ -20,7 +20,9 @@ const themeScript = `
       document.documentElement.classList.add("dark");
     } else if (theme === "light") {
       document.documentElement.classList.remove("dark");
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    } else if (
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    ) {
       document.documentElement.classList.add("dark");
     }
   } catch (e) {}
@@ -36,7 +38,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
-        dangerouslySetInnerHTML={{
+          dangerouslySetInnerHTML={{
             __html: themeScript,
           }}
         />
