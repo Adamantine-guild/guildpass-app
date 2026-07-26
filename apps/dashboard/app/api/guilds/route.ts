@@ -11,6 +11,7 @@ import { getApiMode } from "@/lib/env";
 import { getGuildRepository } from "@/lib/repositories/factory";
 import { recordDashboardActivity } from "@/lib/activity/dashboard";
 import { getActiveGuildId } from "@/lib/guild-context";
+import { guildSchema } from "@guildpass/integration-client";
 
 export async function GET(): Promise<NextResponse> {
   return handleApiError(async () => {
@@ -38,33 +39,43 @@ export async function GET(): Promise<NextResponse> {
  * POST /api/guilds
  * Requires guilds:write permission (create a guild).
  *
- * ⚠️  In production, resolve the session from the request (JWT / cookie)
- *     instead of using MOCK_SESSION, then assertPermission against it.
+ * ⚠️ In production, resolve the session from the request (JWT / cookie)
+ *    instead of using MOCK_SESSION, then assertPermission against it.
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "guilds:write");
   if (!guard.ok) return guard.response;
+
   const { session } = guard;
 
   return handleApiError(async () => {
     const body = await request.json();
-    const errors = validateGuildCreate(body);
-    if (errors.length > 0) {
+
+    // Parse the payload using the imported schema validator
+    const result = guildSchema.safeParse(body);
+
+    if (!result.success) {
+      // Flatten the Zod errors into a simple field -> message format
+      const errors = result.error.flatten().fieldErrors;
       return apiValidationError("Invalid guild payload", errors);
     }
 
+    const validData = result.data;
     const guildRepository = getGuildRepository();
+
     const created = await guildRepository.create({
-      name: body.name.trim(),
-      description: body.description.trim(),
-      memberCount: body.memberCount ?? 0,
-      passCount: body.passCount ?? 0,
+      name: validData.name,
+      description: validData.description,
+      memberCount: validData.memberCount,
+      passCount: validData.passCount,
     });
+
     await recordDashboardActivity({
       type: "guild.created",
       entity: { type: "guild", id: created.id, name: created.name },
       actor: { id: session.userId, name: session.name },
     });
+
     return created;
   });
 }

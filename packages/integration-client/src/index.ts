@@ -19,3 +19,4 @@ export {
   detectSchemaVersion,
   type RawActivityEvent,
 } from "./activity-event-migration.js";
+export * from "./schemas/guild.js";
