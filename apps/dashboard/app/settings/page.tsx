@@ -26,6 +26,7 @@ import { readApiResult } from "@/lib/api-client";
 import type { DashboardSettings } from "@/lib/settings";
 import { validateEmailField } from "@/lib/validation/settings";
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useTheme } from "@/components/ThemeProvider";
 
 export default function SettingsPage() {
   const session = useSession();
@@ -34,6 +35,7 @@ export default function SettingsPage() {
   const [timezone, setTimezone] = useState("UTC");
   const [displayName, setDisplayName] = useState(session.name);
   const [email, setEmail] = useState("admin@guildpass.xyz");
+  const { theme, setTheme } = useTheme();
 
   // Inline validation state for the email field.
   // `emailTouched` gates whether the error is visible: we show it only after
@@ -149,13 +151,16 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           {/* ── General Settings ─────────────────────────────────────────── */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">General Settings</h3>
-            <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-6"
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4">
+
+              General Settings
+              </h3>
+              <div className="space-y-4">
               <div>
                 <label
                   htmlFor="workspace-name"
-                  className="block text-sm font-medium text-slate-700 mb-1"
+                  className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
                 >
                   Workspace Name
                 </label>
@@ -166,8 +171,8 @@ export default function SettingsPage() {
                   onChange={(e) => setWorkspaceName(e.target.value)}
                   disabled={!canEdit || saveMutation.isPending}
                   className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
-                      ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      : "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
+                      ? "border-slate-300 dark:border-slate-600 text-slate-800 dark:text-white bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
                     } ${saveMutation.isPending ? "opacity-50" : ""}`}
                 />
               </div>
@@ -195,7 +200,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-
+          
           {/* ── Profile ──────────────────────────────────────────────────── */}
           <div className="bg-white border border-slate-200 rounded-xl p-6">
             <h3 className="text-lg font-semibold text-slate-800 mb-4">Profile</h3>
@@ -280,6 +285,49 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* ── Appearance ─────────────────────────────────────────────── */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-6">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-1">
+              Appearance
+            </h3>
+            
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+              Choose how the dashboard looks.
+              </p>
+              
+              <div
+              role="group"
+              aria-label="Theme preference"
+              className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-1 bg-slate-50 dark:bg-slate-800"
+              >
+                <button
+                type="button"
+                onClick={() => setTheme("light")}
+                aria-pressed={theme === "light"}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  theme === "light"
+                  ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
+                Light
+                </button>
+                
+                <button
+                type="button"
+                onClick={() => setTheme("dark")}
+                aria-pressed={theme === "dark"}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  theme === "dark"
+                  ? "bg-slate-700 text-white shadow-sm"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
+                Dark
+              </button>
+            </div>
+          </div>
 
         {/* ── Save button — write roles only ───────────────────────────────── */}
         {canEdit && (
