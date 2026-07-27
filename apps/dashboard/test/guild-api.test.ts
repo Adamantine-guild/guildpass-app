@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 // ============================================================================
 // 1. Define the mock implementations
 // ============================================================================
-const mockRequireSessionAndPermission = mock.fn();
-const mockGetActiveGuildId = mock.fn();
-const mockGetGuildRepository = mock.fn();
-const mockRecordDashboardActivity = mock.fn();
+const mockRequireSessionAndPermission = mock.fn(async () => undefined as any);
+const mockGetActiveGuildId = mock.fn(() => undefined as any);
+const mockGetGuildRepository = mock.fn(() => undefined as any);
+const mockRecordDashboardActivity = mock.fn(async () => undefined as any);
 
 const mockHandleApiError = mock.fn(async (cb: () => any) => {
   try {
@@ -179,7 +179,13 @@ describe('POST /api/guilds', () => {
     assert.strictEqual(mockGetGuildRepository.mock.calls.length, 1);
     assert.strictEqual(mockCreate.mock.calls.length, 1);
     
-    const { description, memberCount, name } = mockCreate.mock.calls[0].arguments[0];
+    const createPayload = (mockCreate.mock.calls.at(0) as { arguments?: unknown[] } | undefined)?.arguments?.[0] as {
+      description?: string;
+      memberCount?: number;
+      name?: string;
+    } | undefined;
+    assert.ok(createPayload, 'Expected repository create to receive a payload');
+    const { description, memberCount, name } = createPayload;
     assert.strictEqual(name, 'Adamantine Guild'); // Was trimmed
     assert.strictEqual(description, 'A place for builders');
     assert.strictEqual(memberCount, 50);
@@ -187,7 +193,12 @@ describe('POST /api/guilds', () => {
     // 2. Verify Activity was recorded correctly
     assert.strictEqual(mockRecordDashboardActivity.mock.calls.length, 1);
     
-    const activityArgs = mockRecordDashboardActivity.mock.calls[0].arguments[0];
+    const activityArgs = (mockRecordDashboardActivity.mock.calls.at(0) as { arguments?: unknown[] } | undefined)?.arguments?.[0] as {
+      type: string;
+      entity: { type: string; id: string; name: string };
+      actor: { id: string; name: string };
+    } | undefined;
+    assert.ok(activityArgs, 'Expected dashboard activity to be recorded');
     assert.deepEqual(activityArgs, {
       type: 'guild.created',
       entity: { type: 'guild', id: 'guild-999', name: 'Adamantine Guild' },

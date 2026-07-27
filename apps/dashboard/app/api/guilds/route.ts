@@ -55,8 +55,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = guildSchema.safeParse(body);
 
     if (!result.success) {
-      // Flatten the Zod errors into a simple field -> message format
-      const errors = result.error.flatten().fieldErrors;
+      const errors: ApiFieldError[] = result.error.issues.map((issue) => ({
+        field: issue.path[0] ? String(issue.path[0]) : "body",
+        message: issue.message,
+      }));
       return apiValidationError("Invalid guild payload", errors);
     }
 
