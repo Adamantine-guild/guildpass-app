@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 import { GuildProvider } from "@/lib/guild/GuildProvider";
-import { ThemeProvider } from "@/components/ThemeProvider";
+import { ThemeProvider } from "@/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "GuildPass Dashboard",

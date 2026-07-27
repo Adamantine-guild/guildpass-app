@@ -1,274 +1,249 @@
-"use client";
+  "use client";
 
-/**
- * app/settings/page.tsx
- *
- * Workspace settings page.
- *
- * Visibility rules:
- *  - Page is accessible to ALL roles (settings:read).
- *  - When canEditSettings() is false:
- *      • A read-only info banner is displayed at the top.
- *      • All input / select fields are rendered with the `disabled` attribute.
- *      • The "Save Changes" button is hidden.
- *  - When canEditSettings() is true, the page is fully interactive.
- *
- * Note: handleSave calls PATCH /api/settings. The server-side route handler
- * is the authoritative enforcement point (see app/api/settings/route.ts) —
- * this client only reacts to a 403 response, it does not decide permissions.
- */
-
+import { useState, type FormEvent } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useSession } from "@/lib/hooks/useSession";
 import { canEditSettings } from "@/lib/permissions";
-import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
-import { readApiResult } from "@/lib/api-client";
-import type { DashboardSettings } from "@/lib/settings";
-import { validateEmailField } from "@/lib/validation/settings";
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useTheme } from "@/components/ThemeProvider";
 
 export default function SettingsPage() {
   const session = useSession();
   const canEdit = canEditSettings(session, session.activeGuildId);
+
   const [workspaceName, setWorkspaceName] = useState("GuildPass DAO");
   const [timezone, setTimezone] = useState("UTC");
-  const [displayName, setDisplayName] = useState(session.name);
+  const [displayName, setDisplayName] = useState("Admin");
   const [email, setEmail] = useState("admin@guildpass.xyz");
-  const { theme, setTheme } = useTheme();
-
-  // Inline validation state for the email field.
-  // `emailTouched` gates whether the error is visible: we show it only after
-  // the user has blurred or actively changed the field (not on initial render).
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailTouched, setEmailTouched] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [isSaving, setIsSaving] = useState(false);
 
-  /** Runs the client-side email predicate and updates local error state. */
-  const validateEmail = useCallback((value: string) => {
-    setEmailError(validateEmailField(value));
-  }, []);
+  const saveMutation = { isPending: isSaving };
 
-  // The form is invalid (and Save is blocked) when there is an active email error.
-  const isFormInvalid = emailError !== null;
-
-  const previousSettingsRef = useRef({ workspaceName, timezone, displayName, email });
-
-  // Hydrate the form from the server-side settings source on mount, so the page
-  // reflects persisted values (e.g. after a refresh) rather than the hard-coded
-  // defaults. GET /api/settings requires settings:read, held by every role.
-  useEffect(() => {
-    let active = true;
-    async function loadSettings() {
-      try {
-        const res = await fetch("/api/settings");
-        const data = await readApiResult<DashboardSettings>(res);
-        if (!active || !data) return;
-        if (typeof data.workspaceName === "string") setWorkspaceName(data.workspaceName);
-        if (typeof data.timezone === "string") setTimezone(data.timezone);
-        if (typeof data.displayName === "string") setDisplayName(data.displayName);
-        if (typeof data.email === "string") {
-          setEmail(data.email);
-          // Reset validation state: the loaded value is server-persisted and
-          // considered clean — don't show errors until the user interacts.
-          setEmailTouched(false);
-          setEmailError(null);
-        }
-        previousSettingsRef.current = {
-          workspaceName: data.workspaceName,
-          timezone: data.timezone,
-          displayName: data.displayName,
-          email: data.email,
-        };
-      } catch {
-        /* keep the default values if the read fails */
-      }
+  const validateEmail = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setEmailError("Email is required.");
+      return;
     }
 
-    loadSettings();
-    return () => {
-      active = false;
-    };
-  }, []);
+    const isValid = /.+@.+\..+/.test(trimmed);
+    setEmailError(isValid ? null : "Please enter a valid email address.");
+  };
 
-  const saveMutation = useOptimisticMutation<DashboardSettings, DashboardSettings>({
-    mutationFn: async (data) => {
-      const res = await fetch("/api/settings", {
+  const isFormInvalid = Boolean(emailError) || !workspaceName.trim() || !displayName.trim() || !email.trim();
+
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!canEdit || isFormInvalid) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ workspaceName, timezone, displayName, email }),
       });
 
-      return readApiResult<DashboardSettings>(res);
-    },
-    onOptimisticUpdate: (_data) => {
-      previousSettingsRef.current = { workspaceName, timezone, displayName, email };
-      // Note: In a real app, we'd update the state with the patch here.
-      // For this mock, we assume the form state is already updated via controlled inputs.
-    },
-    onRollback: () => {
-      setWorkspaceName(previousSettingsRef.current.workspaceName);
-      setTimezone(previousSettingsRef.current.timezone);
-      setDisplayName(previousSettingsRef.current.displayName);
-      setEmail(previousSettingsRef.current.email);
-      // Re-validate the rolled-back email value so the error state stays consistent.
-      setEmailError(validateEmailField(previousSettingsRef.current.email));
-    },
-    onSuccess: () => {
-      alert("Settings saved successfully.");
-    },
-    onError: (error) => {
-      alert(error.message);
-    }
-  });
+      if (!response.ok) {
+        throw new Error("Unable to save settings right now.");
+      }
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    saveMutation.mutate({ workspaceName, timezone, displayName, email });
-  }
+      setEmailTouched(false);
+      setEmailError(null);
+    } catch (error) {
+      setEmailTouched(true);
+      setEmailError(error instanceof Error ? error.message : "Unable to save settings right now.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <DashboardLayout title="Settings" session={session}>
-
-      {/* ── Read-only banner ─────────────────────────────────────────────── */}
+      {/* Read-only banner */}
       {!canEdit && (
         <div
           role="status"
           aria-live="polite"
-          className="flex items-start gap-3 mb-6 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4"
+          className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4"
         >
-          <span className="text-amber-500 text-xl leading-none mt-0.5" aria-hidden>🔒</span>
+          <svg
+            aria-hidden="true"
+            className="mt-0.5 h-5 w-5 shrink-0 text-amber-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v2h8z"
+            />
+          </svg>
+
           <div>
-            <p className="text-sm font-semibold text-amber-800">Read-only access</p>
-            <p className="text-sm text-amber-700 mt-0.5">
-              You can view settings but cannot make changes. Contact an admin to
-              update workspace configuration.
+            <p className="text-sm font-semibold text-amber-800">
+              Read-only access
+            </p>
+            <p className="mt-0.5 text-sm text-amber-700">
+              You can view settings but cannot make changes. Contact an admin
+              to update workspace configuration.
             </p>
           </div>
         </div>
       )}
 
       <form onSubmit={handleSave}>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* ── General Settings ─────────────────────────────────────────── */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-6"
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4">
-
+        {/* General Settings and Profile */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* General Settings */}
+          <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
+            <h3 className="mb-4 text-lg font-semibold text-slate-800 dark:text-white">
               General Settings
-              </h3>
-              <div className="space-y-4">
+            </h3>
+
+            <div className="space-y-4">
               <div>
                 <label
                   htmlFor="workspace-name"
-                  className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
                 >
                   Workspace Name
                 </label>
+
                 <input
                   id="workspace-name"
                   type="text"
                   value={workspaceName}
                   onChange={(e) => setWorkspaceName(e.target.value)}
                   disabled={!canEdit || saveMutation.isPending}
-                  className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
-                      ? "border-slate-300 dark:border-slate-600 text-slate-800 dark:text-white bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
-                    } ${saveMutation.isPending ? "opacity-50" : ""}`}
+                  className={`w-full rounded-lg border px-4 py-2 transition-colors ${
+                    canEdit
+                      ? "border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                      : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800"
+                  } ${
+                    saveMutation.isPending ? "opacity-50" : ""
+                  }`}
                 />
               </div>
+
               <div>
                 <label
                   htmlFor="timezone"
-                  className="block text-sm font-medium text-slate-700 mb-1"
+                  className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
                 >
                   Timezone
                 </label>
+
                 <select
                   id="timezone"
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
                   disabled={!canEdit || saveMutation.isPending}
-                  className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
-                      ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      : "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
-                    } ${saveMutation.isPending ? "opacity-50" : ""}`}
+                  className={`w-full rounded-lg border px-4 py-2 transition-colors ${
+                    canEdit
+                      ? "border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                      : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800"
+                  } ${
+                    saveMutation.isPending ? "opacity-50" : ""
+                  }`}
                 >
-                  <option>UTC</option>
-                  <option>America/New_York</option>
-                  <option>Europe/London</option>
+                  <option value="UTC">UTC</option>
+                  <option value="America/New_York">
+                    America/New_York
+                  </option>
+                  <option value="Europe/London">Europe/London</option>
                 </select>
               </div>
             </div>
           </div>
-          
-          {/* ── Profile ──────────────────────────────────────────────────── */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">Profile</h3>
+
+          {/* Profile */}
+          <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
+            <h3 className="mb-4 text-lg font-semibold text-slate-800 dark:text-white">
+              Profile
+            </h3>
+
             <div className="space-y-4">
               <div>
                 <label
                   htmlFor="display-name"
-                  className="block text-sm font-medium text-slate-700 mb-1"
+                  className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
                 >
                   Display Name
                 </label>
+
                 <input
                   id="display-name"
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={!canEdit || saveMutation.isPending}
-                  className={`w-full border rounded-lg px-4 py-2 transition-colors ${canEdit
-                      ? "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      : "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
-                    } ${saveMutation.isPending ? "opacity-50" : ""}`}
+                  className={`w-full rounded-lg border px-4 py-2 transition-colors ${
+                    canEdit
+                      ? "border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                      : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800"
+                  } ${
+                    saveMutation.isPending ? "opacity-50" : ""
+                  }`}
                 />
               </div>
+
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-sm font-medium text-slate-700 mb-1"
+                  className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300"
                 >
                   Email
                 </label>
+
                 <input
                   id="email"
                   type="email"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
-                    // Validate on every keystroke once the field has been touched,
-                    // so errors clear as soon as the user corrects the value.
+
                     if (emailTouched) {
                       validateEmail(e.target.value);
                     }
                   }}
                   onBlur={(e) => {
-                    // Mark as touched and run validation on first blur.
                     setEmailTouched(true);
                     validateEmail(e.target.value);
                   }}
                   disabled={!canEdit || saveMutation.isPending}
-                  aria-describedby={emailError && emailTouched ? "email-error" : undefined}
-                  aria-invalid={emailError !== null && emailTouched ? true : undefined}
-                  className={`w-full border rounded-lg px-4 py-2 transition-colors ${
+                  aria-describedby={
+                    emailError && emailTouched ? "email-error" : undefined
+                  }
+                  aria-invalid={
+                    emailError !== null && emailTouched ? true : undefined
+                  }
+                  className={`w-full rounded-lg border px-4 py-2 transition-colors ${
                     !canEdit
-                      ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
+                      ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-800"
                       : emailError && emailTouched
-                      ? "border-red-400 text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-400"
-                      : "border-slate-300 text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  } ${saveMutation.isPending ? "opacity-50" : ""}`}
+                        ? "border-red-400 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-400 dark:bg-slate-800 dark:text-white"
+                        : "border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                  } ${
+                    saveMutation.isPending ? "opacity-50" : ""
+                  }`}
                 />
-                {/* Inline error — only shown after the field is touched */}
+
                 {emailError && emailTouched && (
                   <p
                     id="email-error"
                     role="alert"
-                    className="mt-1.5 text-xs text-red-600 flex items-center gap-1"
+                    className="mt-1.5 flex items-center gap-1 text-xs text-red-600"
                   >
                     <svg
                       aria-hidden="true"
-                      className="w-3.5 h-3.5 shrink-0"
+                      className="h-3.5 w-3.5 shrink-0"
                       fill="currentColor"
                       viewBox="0 0 20 20"
                     >
@@ -278,6 +253,7 @@ export default function SettingsPage() {
                         clipRule="evenodd"
                       />
                     </svg>
+
                     {emailError}
                   </p>
                 )}
@@ -286,50 +262,50 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* ── Appearance ─────────────────────────────────────────────── */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-1">
-              Appearance
-            </h3>
-            
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-              Choose how the dashboard looks.
-              </p>
-              
-              <div
-              role="group"
-              aria-label="Theme preference"
-              className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-1 bg-slate-50 dark:bg-slate-800"
-              >
-                <button
-                type="button"
-                onClick={() => setTheme("light")}
-                aria-pressed={theme === "light"}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  theme === "light"
-                  ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                }`}
-              >
-                Light
-                </button>
-                
-                <button
-                type="button"
-                onClick={() => setTheme("dark")}
-                aria-pressed={theme === "dark"}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  theme === "dark"
-                  ? "bg-slate-700 text-white shadow-sm"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                }`}
-              >
-                Dark
-              </button>
-            </div>
-          </div>
+        {/* Appearance */}
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
+          <h3 className="mb-1 text-lg font-semibold text-slate-800 dark:text-white">
+            Appearance
+          </h3>
 
-        {/* ── Save button — write roles only ───────────────────────────────── */}
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+            Choose how the dashboard looks.
+          </p>
+
+          <div
+            role="group"
+            aria-label="Theme preference"
+            className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800"
+          >
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              aria-pressed={theme === "light"}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                theme === "light"
+                  ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
+                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              Light
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              aria-pressed={theme === "dark"}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                theme === "dark"
+                  ? "bg-slate-700 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              Dark
+            </button>
+          </div>
+        </div>
+
+        {/* Save button */}
         {canEdit && (
           <div className="mt-6 flex justify-end">
             <button
@@ -337,9 +313,12 @@ export default function SettingsPage() {
               type="submit"
               disabled={saveMutation.isPending || isFormInvalid}
               aria-disabled={isFormInvalid ? true : undefined}
-              className="bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="flex items-center gap-2 rounded-lg bg-violet-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saveMutation.isPending && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              {saveMutation.isPending && (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              )}
+
               {saveMutation.isPending ? "Saving..." : "Save Changes"}
             </button>
           </div>
