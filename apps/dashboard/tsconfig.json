@@ -17,8 +17,10 @@
     "incremental": true,
     "plugins": [{"name": "next"}],
     "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": ["./*"],
+      "@guildpass/env": ["../../packages/env/src/index.ts"],
       "@guildpass/integration-client/*": ["../../packages/integration-client/*"],
       "@guildpass/mock-repositories": ["../../packages/integration-client/mock/mockRepositories"]
     }

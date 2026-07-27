@@ -11,6 +11,7 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "dist",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0"
   }
 }
