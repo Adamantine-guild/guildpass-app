@@ -8,6 +8,7 @@ import StatusBadge from "@/components/StatusBadge";
 import WalletAddressText from "@/components/WalletAddressText";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
 import { ApiClientError, readApiResult } from "@/lib/api-client";
+import { tryNormaliseAddress } from "@/lib/address";
 import { getClientApiMode } from "@/lib/client-env";
 import { useSession } from "@/lib/hooks/useSession";
 import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
@@ -101,6 +102,7 @@ function MembersPageContent() {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [form, setForm] = useState({ name: "", wallet: "" });
+  const [walletError, setWalletError] = useState<string | null>(null);
 
   const updateFilterQuery = useCallback(
     (updates: { search?: string; status?: MemberStatusFilter; role?: MemberRoleFilter; guild?: string; page?: number | null }) => {
@@ -477,10 +479,33 @@ function MembersPageContent() {
             <h2 className="mb-4 text-lg font-semibold text-slate-900">Invite Member</h2>
             <div className="space-y-3">
               <input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full rounded-lg border border-slate-200 p-2" />
-              <input placeholder="Wallet" value={form.wallet} onChange={(e) => setForm({ ...form, wallet: e.target.value })} className="w-full rounded-lg border border-slate-200 p-2" />
+              <div>
+                <input
+                  placeholder="Wallet"
+                  value={form.wallet}
+                  onChange={(e) => {
+                    setForm({ ...form, wallet: e.target.value });
+                    if (walletError) setWalletError(null);
+                  }}
+                  aria-invalid={walletError ? true : undefined}
+                  aria-describedby={walletError ? "invite-wallet-error" : undefined}
+                  className={`w-full rounded-lg border p-2 ${walletError ? "border-red-400" : "border-slate-200"}`}
+                />
+                {walletError && (
+                  <p id="invite-wallet-error" className="mt-1 text-xs text-red-600">
+                    {walletError}
+                  </p>
+                )}
+              </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setIsInviteOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700">
+              <button
+                onClick={() => {
+                  setIsInviteOpen(false);
+                  setWalletError(null);
+                }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+              >
                 Cancel
               </button>
               <button
@@ -488,14 +513,20 @@ function MembersPageContent() {
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                 onClick={async () => {
                   if (!form.name.trim()) return alert("Name is required");
-                  if (!form.wallet.trim()) return alert("Wallet is required");
+
+                  const normalizedWallet = tryNormaliseAddress(form.wallet);
+                  if (!normalizedWallet) {
+                    setWalletError("Enter a valid Ethereum wallet address (0x followed by 40 hex characters).");
+                    return;
+                  }
+                  setWalletError(null);
 
                   try {
                     setInviteLoading(true);
                     const res = await guildFetch("/api/members", guildId, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: form.name.trim(), wallet: form.wallet.trim() }),
+                      body: JSON.stringify({ name: form.name.trim(), wallet: normalizedWallet }),
                     });
                     const newMember = await readApiResult<MockMember>(res);
                     const safeMember = {
@@ -509,7 +540,16 @@ function MembersPageContent() {
                     setIsInviteOpen(false);
                     setForm({ name: "", wallet: "" });
                   } catch (error: unknown) {
-                    alert(error instanceof Error ? error.message : "Failed to invite member.");
+                    const walletFieldError =
+                      error instanceof ApiClientError
+                        ? error.fields?.find((field) => field.field === "wallet")?.message
+                        : undefined;
+
+                    if (walletFieldError) {
+                      setWalletError(walletFieldError);
+                    } else {
+                      alert(error instanceof Error ? error.message : "Failed to invite member.");
+                    }
                   } finally {
                     setInviteLoading(false);
                   }
