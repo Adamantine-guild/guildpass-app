@@ -49,25 +49,28 @@ export async function GET(request: Request): Promise<NextResponse> {
   const guildId = getActiveGuildId(request);
 
   try {
+    // Repository-sourced events are already guild-scoped at the choke point
+    // (IActivityRepository.query requires guildId). Storage-sourced (webhook)
+    // and seed events aren't tagged at write time yet, so they still rely on
+    // the best-effort metadata.guildId filter — see docs/multi-tenancy.md.
     const repositoryEvents = await getActivityRepository()
-      .query({})
+      .query(guildId, {})
       .catch((error) => {
         console.error("Error fetching repository activity:", error);
         return [];
       });
     const storageEvents = await activityStorage.getEvents();
     const seedEvents = mockActivity.map(mockActivityToEvent);
+    const scopedStorageAndSeed = filterActivityEventsByGuild([...storageEvents, ...seedEvents], guildId);
 
     const seen = new Set<string>();
-    const merged = [...repositoryEvents, ...storageEvents, ...seedEvents].filter((event) => {
+    const merged = [...repositoryEvents, ...scopedStorageAndSeed].filter((event) => {
       if (seen.has(event.id)) return false;
       seen.add(event.id);
       return true;
     });
 
-    // Tenant scope first, then apply list filters / pagination.
-    const scoped = filterActivityEventsByGuild(merged, guildId);
-    const result = filterActivityEvents(scoped, parsed.value);
+    const result = filterActivityEvents(merged, parsed.value);
     return apiResponse(result);
   } catch (error) {
     console.error("Error fetching activity:", error);

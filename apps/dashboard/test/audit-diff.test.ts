@@ -227,7 +227,7 @@ describe("MockMemberRepository diff recording", () => {
     assert.ok(updated);
     assert.deepEqual(updated.roles, ["contributor"]);
 
-    const events = await activityRepo.query({ limit: 5 });
+    const events = await activityRepo.query("1", { limit: 5 });
     const roleEvent = events.find((e) => e.type === "member.roles_changed");
     assert.ok(roleEvent, "Should emit a member.roles_changed event");
 
@@ -247,7 +247,7 @@ describe("MockMemberRepository diff recording", () => {
     assert.ok(updated);
     assert.equal(updated.status, "active");
 
-    const events = await activityRepo.query({ limit: 5 });
+    const events = await activityRepo.query("1", { limit: 5 });
     const updateEvent = events.find((e) => e.type === "member.left");
     assert.ok(updateEvent, "Should emit a member update event");
 
@@ -266,7 +266,7 @@ describe("MockSettingsRepository diff recording", () => {
 
     await settingsRepo.update({ workspaceName: "Acme DAO", email: "new@acme.xyz" });
 
-    const events = await activityRepo.query({ limit: 5 });
+    const events = await activityRepo.query("1", { limit: 5 });
     const settingsEvent = events.find((e) =>
       e.description.includes("workspaceName") || e.description.includes("email"),
     );
@@ -292,11 +292,11 @@ describe("MockSettingsRepository diff recording", () => {
 
     // First update to establish baseline
     await settingsRepo.update({ workspaceName: "Test DAO" });
-    const afterFirst = (await activityRepo.query({ limit: 10 })).length;
+    const afterFirst = (await activityRepo.query("1", { limit: 10 })).length;
 
     // No-op: same value
     await settingsRepo.update({ workspaceName: "Test DAO" });
-    const afterSecond = (await activityRepo.query({ limit: 10 })).length;
+    const afterSecond = (await activityRepo.query("1", { limit: 10 })).length;
 
     // Should be same count since no fields actually changed
     assert.equal(afterSecond, afterFirst);

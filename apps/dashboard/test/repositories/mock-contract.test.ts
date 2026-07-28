@@ -15,6 +15,7 @@ import {
   activityRepositoryContract,
   passRepositoryIsolationContract,
   memberRepositoryIsolationContract,
+  activityRepositoryIsolationContract,
 } from "./contracts";
 import {
   MockPassRepository,
@@ -32,3 +33,4 @@ activityRepositoryContract(() => new MockActivityRepository());
 // conforming repository implementation, mock included.
 passRepositoryIsolationContract(() => new MockPassRepository());
 memberRepositoryIsolationContract(() => new MockMemberRepository());
+activityRepositoryIsolationContract(() => new MockActivityRepository());
