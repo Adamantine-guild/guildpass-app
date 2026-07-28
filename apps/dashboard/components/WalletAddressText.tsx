@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatWalletAddress } from "@/lib/formatters/wallet";
+import { copyToClipboard } from "@/lib/clipboard";
 
 type WalletAddressTextProps = {
   address?: string | null;
@@ -23,12 +24,12 @@ export default function WalletAddressText({
   const truncated = formatWalletAddress(address, prefixLength, suffixLength);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(address);
+    const success = await copyToClipboard(address);
+    if (success) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch (error) {
-      console.warn("Failed to copy wallet address:", error);
+    } else {
+      console.warn("Failed to copy wallet address");
     }
   };
 
