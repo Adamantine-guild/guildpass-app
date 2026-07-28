@@ -279,12 +279,16 @@ export default function SettingsPage() {
           >
             <button
               type="button"
-              onClick={() => setTheme("light")}
+              onClick={() => canEdit && setTheme("light")}
               aria-pressed={theme === "light"}
+              disabled={!canEdit}
+              aria-disabled={!canEdit}
               className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                theme === "light"
-                  ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
-                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                !canEdit
+                  ? "cursor-not-allowed text-slate-400 dark:text-slate-500"
+                  : theme === "light"
+                    ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
+                    : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               }`}
             >
               Light
@@ -292,12 +296,16 @@ export default function SettingsPage() {
 
             <button
               type="button"
-              onClick={() => setTheme("dark")}
+              onClick={() => canEdit && setTheme("dark")}
               aria-pressed={theme === "dark"}
+              disabled={!canEdit}
+              aria-disabled={!canEdit}
               className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                theme === "dark"
-                  ? "bg-slate-700 text-white shadow-sm"
-                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                !canEdit
+                  ? "cursor-not-allowed text-slate-400 dark:text-slate-500"
+                  : theme === "dark"
+                    ? "bg-slate-700 text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               }`}
             >
               Dark
