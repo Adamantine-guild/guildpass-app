@@ -1,5 +1,6 @@
 import type { ActivityEvent, WebhookPayload } from "./types";
 import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
+import { sanitiseWebhookData } from "./sanitise";
 
 function displayValue(...values: Array<unknown>): string {
   const value = values.find((item) => typeof item === "string" && item.length > 0);
@@ -34,7 +35,7 @@ export function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | n
           id: entityId(data.id, data.wallet, data.name),
           name: typeof data.name === "string" ? data.name : undefined,
         },
-        metadata: data,
+        metadata: sanitiseWebhookData(type, data),
         schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     }
@@ -58,7 +59,7 @@ export function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | n
           id: entityId(data.id, data.wallet, data.name),
           name: typeof data.name === "string" ? data.name : undefined,
         },
-        metadata: data,
+        metadata: sanitiseWebhookData(type, data),
         schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     }
@@ -81,7 +82,7 @@ export function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | n
           id: entityId(data.id, data.name),
           name: typeof data.name === "string" ? data.name : undefined,
         },
-        metadata: data,
+        metadata: sanitiseWebhookData(type, data),
         schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     }
@@ -104,7 +105,7 @@ export function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | n
           id: entityId(data.id, data.name),
           name: typeof data.name === "string" ? data.name : undefined,
         },
-        metadata: data,
+        metadata: sanitiseWebhookData(type, data),
         schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     }
@@ -127,7 +128,7 @@ export function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | n
           id: entityId(data.id, data.name),
           name: typeof data.name === "string" ? data.name : undefined,
         },
-        metadata: data,
+        metadata: sanitiseWebhookData(type, data),
         schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     }
@@ -147,7 +148,7 @@ export function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | n
           type: "verification",
           id: entityId(data.wallet),
         },
-        metadata: data,
+        metadata: sanitiseWebhookData(type, data),
         schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
 

@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/format-relative-time";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
 import { convertToCsv, downloadCsv, } from "@/lib/csv-export";
 import {
+  type ActivityEventEntity,
   type ActivityEventSeverity,
   type ActivityEventSource,
   type ActivityEventType,
@@ -83,6 +84,15 @@ const SEVERITY_FILTERS: { label: string; value: ActivityEventSeverity | "" }[] =
   { label: "Critical", value: "critical" },
 ];
 
+const ENTITY_TYPE_FILTERS: { label: string; value: ActivityEventEntity["type"] | "" }[] = [
+  { label: "All entity types", value: "" },
+  { label: "Pass", value: "pass" },
+  { label: "Guild", value: "guild" },
+  { label: "Member", value: "member" },
+  { label: "Verification", value: "verification" },
+  { label: "Webhook", value: "webhook" },
+];
+
 const SORT_OPTIONS: { label: string; value: ActivitySortOrder }[] = [
   { label: "Newest first", value: "newest" },
   { label: "Oldest first", value: "oldest" },
@@ -106,6 +116,7 @@ function ActivityPageContent() {
   const [type, setType] = useState<ActivityEventType | "">(() => (searchParams.get("type") as ActivityEventType | null) ?? "");
   const [source, setSource] = useState<ActivityEventSource | "">(() => (searchParams.get("source") as ActivityEventSource | null) ?? "");
   const [severity, setSeverity] = useState<ActivityEventSeverity | "">(() => (searchParams.get("severity") as ActivityEventSeverity | null) ?? "");
+  const [entityType, setEntityType] = useState<ActivityEventEntity["type"] | "">(() => (searchParams.get("entityType") as ActivityEventEntity["type"] | null) ?? "");
   const [actor, setActor] = useState(() => searchParams.get("actor") ?? "");
   const [from, setFrom] = useState(() => searchParams.get("from") ?? "");
   const [sort, setSort] = useState<ActivitySortOrder>(() => readSort(searchParams.get("sort")));
@@ -116,6 +127,7 @@ function ActivityPageContent() {
       type?: ActivityEventType | "";
       source?: ActivityEventSource | "";
       severity?: ActivityEventSeverity | "";
+      entityType?: ActivityEventEntity["type"] | "";
       actor?: string;
       from?: string;
       sort?: ActivitySortOrder;
@@ -134,6 +146,7 @@ function ActivityPageContent() {
       if (updates.type !== undefined) setOrDelete("type", updates.type);
       if (updates.source !== undefined) setOrDelete("source", updates.source);
       if (updates.severity !== undefined) setOrDelete("severity", updates.severity);
+      if (updates.entityType !== undefined) setOrDelete("entityType", updates.entityType);
       if (updates.actor !== undefined) setOrDelete("actor", updates.actor);
       if (updates.from !== undefined) setOrDelete("from", updates.from);
       if (updates.sort !== undefined) {
@@ -161,6 +174,7 @@ function ActivityPageContent() {
     const nextType = (searchParams.get("type") as ActivityEventType | null) ?? "";
     const nextSource = (searchParams.get("source") as ActivityEventSource | null) ?? "";
     const nextSeverity = (searchParams.get("severity") as ActivityEventSeverity | null) ?? "";
+    const nextEntityType = (searchParams.get("entityType") as ActivityEventEntity["type"] | null) ?? "";
     const nextActor = searchParams.get("actor") ?? "";
     const nextFrom = searchParams.get("from") ?? "";
     const nextSort = readSort(searchParams.get("sort"));
@@ -169,11 +183,12 @@ function ActivityPageContent() {
     if (nextType !== type) setType(nextType);
     if (nextSource !== source) setSource(nextSource);
     if (nextSeverity !== severity) setSeverity(nextSeverity);
+    if (nextEntityType !== entityType) setEntityType(nextEntityType);
     if (nextActor !== actor) setActor(nextActor);
     if (nextFrom !== from) setFrom(nextFrom);
     if (nextSort !== sort) setSort(nextSort);
     if (nextLimit !== limit) setLimit(nextLimit);
-  }, [actor, from, limit, searchParams, severity, sort, source, type]);
+  }, [actor, entityType, from, limit, searchParams, severity, sort, source, type]);
 
   const fromIso = useMemo(() => {
     if (!from) return undefined;
@@ -197,6 +212,7 @@ function ActivityPageContent() {
     type: type || undefined,
     source: source || undefined,
     severity: severity || undefined,
+    entityType: entityType || undefined,
     actor: actor.trim() || undefined,
     from: fromIso,
     sort,
@@ -250,17 +266,18 @@ function ActivityPageContent() {
   downloadCsv(csv, `activity-log-${date}.csv`);
 };
 
-  const hasActiveFilters = Boolean(type || source || severity || actor.trim() || from || sort !== "newest" || limit !== 10);
+  const hasActiveFilters = Boolean(type || source || severity || entityType || actor.trim() || from || sort !== "newest" || limit !== 10);
 
   const clearFilters = () => {
     setType("");
     setSource("");
     setSeverity("");
+    setEntityType("");
     setActor("");
     setFrom("");
     setSort("newest");
     setLimit(10);
-    updateActivityQuery({ type: "", source: "", severity: "", actor: "", from: "", sort: "newest", limit: 10 });
+    updateActivityQuery({ type: "", source: "", severity: "", entityType: "", actor: "", from: "", sort: "newest", limit: 10 });
   };
 
   return (
@@ -282,16 +299,6 @@ function ActivityPageContent() {
           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           title="Fetch the latest activity events"
         >
-          </button>
-
-        <button
-          type="button"
-          onClick={refresh}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          title="Fetch the latest activity events"
-          >
-
           <svg
             className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
             fill="none"
@@ -311,7 +318,7 @@ function ActivityPageContent() {
       </div>
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-8">
           <label className="text-xs font-medium text-slate-600">
             Event type
             <select
@@ -351,6 +358,21 @@ function ActivityPageContent() {
             >
               {SEVERITY_FILTERS.map((option) => (
                 <option key={option.value || "all-severities"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-xs font-medium text-slate-600">
+            Entity type
+            <select
+              value={entityType}
+              onChange={(event) => { const value = event.target.value as ActivityEventEntity["type"] | ""; setEntityType(value); updateActivityQuery({ entityType: value }); }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            >
+              {ENTITY_TYPE_FILTERS.map((option) => (
+                <option key={option.value || "all-entity-types"} value={option.value}>
                   {option.label}
                 </option>
               ))}

@@ -96,6 +96,16 @@ describe("activity query contract", () => {
     assert.equal(result.nextCursor, "evt_query_003");
   });
 
+  test("filters by entityType alone", () => {
+    const result = filterActivityEvents(events, { entityType: "verification", limit: 10 });
+
+    assert.deepEqual(
+      result.events.map((event) => event.id),
+      ["evt_query_003"]
+    );
+    assert.equal(result.nextCursor, null);
+  });
+
   test("returns an empty page for valid filters with no matches", () => {
     const result = filterActivityEvents(events, {
       type: "guild.deleted",
@@ -138,6 +148,20 @@ describe("activity query contract", () => {
     assert.deepEqual(
       parsed.errors.map((error) => error.field),
       ["limit", "type", "sort", "from"]
+    );
+  });
+
+  test("rejects an invalid entityType parameter", () => {
+    const parsed = parseActivityQuery(
+      new URL("https://example.test/api/activity?entityType=not-real").searchParams
+    );
+
+    assert.equal(parsed.ok, false);
+    if (parsed.ok) return;
+
+    assert.deepEqual(
+      parsed.errors.map((error) => error.field),
+      ["entityType"]
     );
   });
 });
