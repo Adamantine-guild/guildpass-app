@@ -67,6 +67,134 @@ shape. Events written before `schemaVersion` existed are treated as V1.
 Adding a field means: bump the constant, add a `MIGRATIONS.set(n, ...)`
 entry, and add a fixture at the old version to the migration test suite.
 
+## Tamper-evident PostgreSQL chain
+
+Durable rows in PostgreSQL's `activity_events` table form one global,
+append-only hash chain. This is a global chain because the persisted
+`ActivityEvent` model does not have a reliable first-class `guildId`; splitting
+the chain by a derived JSON value would leave unscoped events ambiguous. Both
+durable writers (`DASHBOARD_STORAGE_MODE=durable` and
+`ACTIVITY_STORAGE_MODE=durable`) append to this same chain.
+
+This protection applies only to PostgreSQL rows. In-memory events, the local
+JSONL file adapter, and synthetic events merged into the `/api/activity` feed
+are unchanged and are not attested by this chain.
+
+### Chain fields, order, and genesis
+
+Migration `0002_activity_hash_chain.sql` adds:
+
+| Field | Meaning |
+| --- | --- |
+| `chain_sequence` | Positive, unique `BIGINT` defining the authoritative total order. |
+| `previous_hash` | Lowercase 64-character SHA-256 hex digest of the predecessor, or genesis for sequence 1. |
+| `entry_hash` | Lowercase 64-character SHA-256 digest for this entry. |
+
+The genesis predecessor is exactly 64 zero characters. A singleton
+`activity_chain_head` row records the latest sequence, hash, and entry ID for
+the global chain.
+
+### Canonical hash input
+
+Hash format version 1 binds these final database values, in this exact order:
+
+1. `chain_sequence`;
+2. `id`, `type`, `source`, and `severity`;
+3. `actor`;
+4. `timestamp`;
+5. `description`;
+6. `entity`, `metadata`, and `changes`;
+7. `schema_version`.
+
+PostgreSQL normalizes every would-be value before hashing. JSON values use
+PostgreSQL's `JSONB` text form, so object insertion order and insignificant
+whitespace do not affect the hash; array order remains significant. SQL NULL
+is distinct from JSON `null`. Timestamps use UTC with all six PostgreSQL
+fractional digits (`YYYY-MM-DDTHH:mm:ss.ffffffZ`), and numeric database values
+are decimal strings so JavaScript rounding cannot change them.
+
+The outer serialization does not use arbitrary-object `JSON.stringify`.
+Fields have a fixed order and are UTF-8 byte-length framed; SQL NULL uses the
+separate `-1:` marker. The SHA-256 input also includes a domain identifier,
+format version, and the separately framed predecessor hash. The chain format
+version is immutable for existing rows: a future format change requires a
+version-aware migration/verifier, not changing the version-1 constant in
+place.
+
+### Atomic append and concurrency
+
+A durable append runs in one PostgreSQL transaction:
+
+1. normalize the final persisted values;
+2. lock the singleton head row with `SELECT ... FOR UPDATE`;
+3. confirm the head still matches the persisted tail;
+4. allocate `last_sequence + 1` and compute SHA-256;
+5. insert the event and update the head;
+6. commit.
+
+The head row lock and compare-and-set update serialize concurrent writers, so
+two successful appends cannot use the same predecessor. Webhook idempotency's
+`processed_events` marker is written in the same transaction; hashing or
+insert failure rolls back both. Durable mode never falls back to an unhashed
+insert.
+
+### Migration and existing durable rows
+
+The migration runner backfills existing rows in deterministic
+`timestamp ASC, id COLLATE "C" ASC` order while holding exclusive table locks,
+then makes every chain field `NOT NULL`. It refuses mixed chain state, a
+non-genesis initial head, or a populated corrupt chain; it never silently
+rehashes an existing corrupt history. A populated intact chain is a no-op on
+safe recovery.
+
+The TypeScript data-migration hook is security-critical. Applying the SQL file
+directly does **not** run the backfill or `NOT NULL` enforcement. Deployments
+must stop old writers, run `pnpm db:migrate`, and then start the new
+application version. The backfill currently scans and updates the log while
+holding an exclusive lock, so a large production log requires a planned
+maintenance window.
+
+### Verification API
+
+`verifyDurableActivityChain()` scans the PostgreSQL chain in sequence order in
+a read-only, repeatable-read transaction. It recomputes each hash and returns
+the first invalid sequence, predecessor, stored hash, or content-bound hash.
+It also compares the verified tail with the database-local head.
+
+Owners and admins can call:
+
+```text
+GET /api/activity/verify
+```
+
+The route uses the existing `guilds:write` authorization check and returns the
+normal `{ ok, data }` API envelope. Detected corruption is a successful
+verification result (`HTTP 200`, `data.intact: false`); authentication and
+database failures retain their normal error statuses. When neither PostgreSQL
+activity mode is enabled, the route returns `501 UNSUPPORTED`.
+
+### Threat model and external anchoring
+
+The chain detects an isolated historical edit because the stored entry hash no
+longer matches its canonical content. Deleting a middle row creates a sequence
+gap and breaks the successor relationship. Changing a stored hash is detected
+at that row. The database-local head also detects an isolated latest-row
+deletion when the head is left unchanged.
+
+This is tamper-evident, not tamper-proof. The activity data, all hashes, and the
+head are in the same mutable PostgreSQL trust domain. An attacker with
+unrestricted database access can replace history, recompute all subsequent
+hashes, and replace the head. The same attacker can delete an unanchored tail
+and roll the database-local head back, which the remaining internally
+consistent prefix cannot reveal.
+
+Protecting against full-chain replacement or a deliberately adjusted tail
+requires a trusted external anchor. A future design could periodically record
+the chain scope, latest sequence, latest hash, and timestamp in an immutable
+logging service, append-only object store, signed checkpoint system, or
+separate security datastore. External anchoring is intentionally deferred by
+this issue.
+
 ## Supported filters
 
 Filtering and validation live in `apps/dashboard/lib/activity/query.ts`.

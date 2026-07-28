@@ -1,4 +1,4 @@
-import { test, describe } from "node:test";
+import { after, test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +10,14 @@ import {
   InMemoryActivityStorage,
 } from "../lib/activity/storage.js";
 import { makeActivityEvent } from "./fixtures.js";
+import { acquirePostgresTestLock } from "./postgres-test-lock.js";
+
+const releasePostgresTestLock = process.env.DATABASE_URL
+  ? await acquirePostgresTestLock()
+  : null;
+after(async () => {
+  await releasePostgresTestLock?.();
+});
 
 function makeEvent(id: string) {
   return makeActivityEvent({ id });
@@ -48,7 +56,9 @@ describe("idempotency store backends", () => {
       return;
     }
 
-    const event = makeEvent("durable_second_instance_001");
+    const event = makeEvent(
+      `durable_second_instance_${process.pid}_${Date.now()}`,
+    );
     const first = new DurableActivityStorage({ maxEvents: 20, ttlSeconds: 3600 });
     const second = new DurableActivityStorage({ maxEvents: 20, ttlSeconds: 3600 });
 

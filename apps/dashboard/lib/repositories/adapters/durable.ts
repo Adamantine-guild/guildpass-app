@@ -44,6 +44,7 @@ import {
   type SettingsPatchPayload,
 } from "@/lib/validation/settings";
 import { computeDiff } from "@/lib/activity/diff";
+import { appendDurableActivityEvent } from "@/lib/activity/hash-chain";
 import { ConflictError } from "@/lib/api-errors";
 import { query, withTransaction } from "../../db";
 
@@ -1150,29 +1151,12 @@ export class DurableActivityRepository
     const schemaVersion =
       event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION;
 
-    const result = await query(
-      `INSERT INTO activity_events (id, type, source, severity, actor, timestamp, description, entity, metadata, changes, schema_version)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11) RETURNING *`,
-      [
-        id,
-        event.type,
-        event.source,
-        event.severity,
-        JSON.stringify(event.actor),
-        now,
-        event.description,
-        event.entity ? JSON.stringify(event.entity) : null,
-        event.metadata ? JSON.stringify(event.metadata) : null,
-        event.changes ? JSON.stringify(event.changes) : null,
-        schemaVersion,
-      ],
-    );
-
-    await query(
-      "INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING",
-      [id],
-    );
-    return rowToActivityEvent(result.rows[0]);
+    return appendDurableActivityEvent({
+      ...event,
+      id,
+      timestamp: now,
+      schemaVersion,
+    });
   }
 
   async query(options?: {
@@ -1219,7 +1203,7 @@ export class DurableActivityRepository
     if (options?.limit) params.push(options.limit);
 
     const result = await query(
-      `SELECT * FROM activity_events ${where} ORDER BY timestamp DESC ${limit}`,
+      `SELECT * FROM activity_events ${where} ORDER BY timestamp DESC, chain_sequence DESC ${limit}`,
       params,
     );
     return result.rows.map(rowToActivityEvent);

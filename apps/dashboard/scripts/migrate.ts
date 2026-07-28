@@ -16,13 +16,21 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { backfillActivityHashChain } from "./migrations/activity-hash-chain.js";
 
 const { Client } = pg;
 
-const MIGRATIONS_DIR = path.resolve(
-  new URL(".", import.meta.url).pathname,
-  "../migrations",
+const DATA_MIGRATIONS = new Map<
+  string,
+  (client: pg.ClientBase) => Promise<void>
+>([
+  ["0002_activity_hash_chain.sql", backfillActivityHashChain],
+]);
+
+const MIGRATIONS_DIR = fileURLToPath(
+  new URL("../migrations/", import.meta.url),
 );
 
 async function main() {
@@ -36,6 +44,12 @@ async function main() {
 
   try {
     await client.connect();
+    // Serialize migration runners. The activity-chain backfill must never be
+    // replayed by a second runner using a stale pending list. This
+    // session-level lock is released automatically when the client ends.
+    await client.query(
+      "SELECT pg_advisory_lock(hashtext('guildpass-dashboard-migrations'))",
+    );
     console.log("✅ Connected to database.");
 
     // Ensure the tracking table exists.
@@ -82,11 +96,28 @@ async function main() {
       console.log(`  ➜ Applying ${file}...`);
 
       try {
-        await client.query(sql);
-        await client.query(
-          "INSERT INTO _migrations (name) VALUES ($1)",
-          [file],
-        );
+        const dataMigration = DATA_MIGRATIONS.get(file);
+        if (dataMigration) {
+          await client.query("BEGIN");
+          try {
+            await client.query(sql);
+            await dataMigration(client);
+            await client.query(
+              "INSERT INTO _migrations (name) VALUES ($1)",
+              [file],
+            );
+            await client.query("COMMIT");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          }
+        } else {
+          await client.query(sql);
+          await client.query(
+            "INSERT INTO _migrations (name) VALUES ($1)",
+            [file],
+          );
+        }
         console.log(`  ✅ ${file} applied.`);
       } catch (err) {
         console.error(`  ❌ ${file} failed:`, (err as Error).message);

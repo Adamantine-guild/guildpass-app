@@ -12,6 +12,8 @@
 
 import pg from "pg";
 import { mockGuilds, mockPasses, mockMembers, mockActivity } from "../lib/mock-data.js";
+import { seedDurableActivityEvent } from "../lib/activity/hash-chain.js";
+import type { ActivityEvent } from "../lib/activity/types.js";
 
 const { Client } = pg;
 
@@ -66,23 +68,21 @@ async function main() {
     // ── Activity ────────────────────────────────────────────────────────
     console.log("  ➜ Seeding activity events...");
     for (const a of mockActivity) {
-      await client.query(
-        `INSERT INTO activity_events (id, type, source, severity, actor, timestamp, description, entity, changes, schema_version)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9::jsonb, $10)
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          a.id,
-          mapLegacyActivityType(a.type),
-          "dashboard",
-          "info",
-          JSON.stringify({ name: a.actor }),
-          a.timestamp,
-          a.description,
-          a.guildId ? JSON.stringify({ type: "guild", id: a.guildId }) : null,
-          a.changes ? JSON.stringify(a.changes) : null,
-          2,
-        ],
-      );
+      const event: ActivityEvent = {
+        id: a.id,
+        type: mapLegacyActivityType(a.type),
+        source: "dashboard",
+        severity: "info",
+        actor: { name: a.actor },
+        timestamp: a.timestamp,
+        description: a.description,
+        ...(a.guildId
+          ? { entity: { type: "guild" as const, id: a.guildId } }
+          : {}),
+        ...(a.changes ? { changes: a.changes } : {}),
+        schemaVersion: 2,
+      };
+      await seedDurableActivityEvent(client, event);
     }
 
     await client.query("COMMIT");
@@ -99,15 +99,15 @@ async function main() {
 /**
  * Map legacy mock activity types to the canonical ActivityEventType union.
  */
-function mapLegacyActivityType(type: string): string {
-  const map: Record<string, string> = {
+function mapLegacyActivityType(type: string): ActivityEvent["type"] {
+  const map: Record<string, ActivityEvent["type"]> = {
     pass_created: "pass.created",
     pass_purchased: "pass.purchased",
     member_joined: "member.joined",
     role_changed: "member.roles_changed",
     access_granted: "access.granted",
   };
-  return map[type] ?? type;
+  return map[type] ?? (type as ActivityEvent["type"]);
 }
 
 main();

@@ -6,6 +6,7 @@ This directory contains Next.js API route handlers for the GuildPass dashboard.
 
 ### Activity Feed
 - **GET** `/api/activity` - Fetch recent activity events
+- **GET** `/api/activity/verify` - Verify the global durable PostgreSQL activity hash chain (owner/admin; `guilds:write`)
 
 ### Guilds
 - **GET** `/api/guilds` - List guilds and their metadata

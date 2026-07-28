@@ -1,4 +1,4 @@
-import test, { beforeEach } from "node:test";
+import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { query } from "../../lib/db";
 import { mockGuilds, mockPasses, mockMembers } from "../../lib/mock-data";
@@ -16,8 +16,15 @@ import {
   DurableMemberRepository,
   DurableActivityRepository,
 } from "../../lib/repositories/adapters/durable";
+import { acquirePostgresTestLock } from "../postgres-test-lock";
 
 const connectionString = process.env.DATABASE_URL;
+const releasePostgresTestLock = connectionString
+  ? await acquirePostgresTestLock()
+  : null;
+after(async () => {
+  await releasePostgresTestLock?.();
+});
 
 if (!connectionString) {
   test("Durable Repository Contracts (skipped: DATABASE_URL not set)", () => {
@@ -27,6 +34,13 @@ if (!connectionString) {
   // Truncate and seed tables before each contract test to ensure clean states
   beforeEach(async () => {
     await query("TRUNCATE TABLE passes, members, guilds, activity_events, processed_events CASCADE");
+    await query(
+      `UPDATE activity_chain_head
+       SET last_sequence = 0,
+           last_hash = repeat('0', 64),
+           last_entry_id = NULL
+       WHERE scope = 'global'`,
+    );
 
     // Insert guilds
     for (const g of mockGuilds) {
