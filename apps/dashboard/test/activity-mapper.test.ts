@@ -63,7 +63,7 @@ describe("mapWebhookToActivity", () => {
       id: "member_456",
       name: "Bob",
     });
-    assert.strictEqual(activity?.metadata, data);
+    assert.deepStrictEqual(activity?.metadata, data);
   });
 
   test("maps pass.created webhooks", () => {
@@ -82,7 +82,7 @@ describe("mapWebhookToActivity", () => {
       id: "pass_123",
       name: "Founders Pass",
     });
-    assert.strictEqual(activity?.metadata, data);
+    assert.deepStrictEqual(activity?.metadata, data);
   });
 
   test("maps pass.updated webhooks", () => {
@@ -100,7 +100,7 @@ describe("mapWebhookToActivity", () => {
       id: "pass_456",
       name: "VIP Pass",
     });
-    assert.strictEqual(activity?.metadata, data);
+    assert.deepStrictEqual(activity?.metadata, data);
   });
 
   test("maps guild.updated webhooks", () => {
@@ -118,7 +118,7 @@ describe("mapWebhookToActivity", () => {
       id: "guild_123",
       name: "Adamantine Guild",
     });
-    assert.strictEqual(activity?.metadata, data);
+    assert.deepStrictEqual(activity?.metadata, data);
   });
 
   test("maps verification.completed webhooks", () => {
@@ -135,7 +135,7 @@ describe("mapWebhookToActivity", () => {
       type: "verification",
       id: "0x987",
     });
-    assert.strictEqual(activity?.metadata, data);
+    assert.deepStrictEqual(activity?.metadata, data);
   });
 
   test("returns null for unsupported webhook event types", () => {
@@ -172,5 +172,54 @@ describe("mapWebhookToActivity", () => {
     assert.strictEqual(member?.description, "New member joined: 0xmissing");
     assert.strictEqual(pass?.description, "New pass created: pass_without_name");
     assert.strictEqual(guild?.description, "Guild settings updated: guild_without_name");
+  });
+});
+
+describe("mapWebhookToActivity metadata sanitisation", () => {
+  test("strips fields outside the per-type allowlist from stored metadata", () => {
+    const activity = mapWebhookToActivity(
+      payload({
+        id: "evt_membership_created_extra_fields",
+        type: "membership.created",
+        data: {
+          id: "member_123",
+          name: "Alice",
+          wallet: "0xabc",
+          email: "alice@example.com",
+          password: "hunter2",
+        },
+      })
+    );
+
+    assert.deepStrictEqual(activity?.metadata, {
+      id: "member_123",
+      name: "Alice",
+      wallet: "0xabc",
+    });
+    assert.strictEqual("email" in (activity?.metadata ?? {}), false);
+    assert.strictEqual("password" in (activity?.metadata ?? {}), false);
+  });
+
+  test("stores an empty metadata object for unrecognised data fields", () => {
+    const activity = mapWebhookToActivity(
+      payload({
+        id: "evt_pass_created_extra_fields",
+        type: "pass.created",
+        data: { id: "pass_123", name: "Founders Pass", internalNotes: "do not expose" },
+      })
+    );
+
+    assert.deepStrictEqual(activity?.metadata, { id: "pass_123", name: "Founders Pass" });
+    assert.strictEqual("internalNotes" in (activity?.metadata ?? {}), false);
+  });
+
+  test("never stores the raw webhook data object as metadata by reference", () => {
+    const data = { id: "guild_123", name: "Adamantine Guild", secret: "leaked" };
+    const activity = mapWebhookToActivity(
+      payload({ id: "evt_guild_updated_extra_fields", type: "guild.updated", data })
+    );
+
+    assert.notStrictEqual(activity?.metadata, data);
+    assert.strictEqual("secret" in (activity?.metadata ?? {}), false);
   });
 });
