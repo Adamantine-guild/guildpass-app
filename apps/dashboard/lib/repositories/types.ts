@@ -32,6 +32,10 @@ export interface MemberListQuery extends PaginationOptions {
   search?: string;
   status?: Member["status"] | "all";
   role?: string | "all";
+  /** Inclusive lower bound on `joinedAt`, as a `YYYY-MM-DD` date or ISO timestamp. */
+  joinedFrom?: string;
+  /** Inclusive upper bound on `joinedAt`, as a `YYYY-MM-DD` date or ISO timestamp. */
+  joinedTo?: string;
 }
 
 /**
