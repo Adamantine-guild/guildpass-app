@@ -45,6 +45,7 @@ import {
   type SettingsPatchPayload,
 } from "@/lib/validation/settings";
 import { computeDiff } from "@/lib/activity/diff";
+import { appendDurableActivityEvent } from "@/lib/activity/hash-chain";
 import { ConflictError } from "@/lib/api-errors";
 import { query, withTransaction } from "../../db";
 
@@ -1174,6 +1175,12 @@ export class DurableActivityRepository
     const schemaVersion =
       event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION;
 
+    return appendDurableActivityEvent({
+      ...event,
+      id,
+      timestamp: now,
+      schemaVersion,
+    });
     const result = await query(
       `INSERT INTO activity_events (id, guild_id, type, source, severity, actor, timestamp, description, entity, metadata, changes, schema_version)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12) RETURNING *`,
@@ -1245,7 +1252,7 @@ export class DurableActivityRepository
     if (options?.limit) params.push(options.limit);
 
     const result = await query(
-      `SELECT * FROM activity_events ${where} ORDER BY timestamp DESC ${limit}`,
+      `SELECT * FROM activity_events ${where} ORDER BY timestamp DESC, chain_sequence DESC ${limit}`,
       params,
     );
     return result.rows.map(rowToActivityEvent);

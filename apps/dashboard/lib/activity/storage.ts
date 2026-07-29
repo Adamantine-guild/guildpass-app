@@ -10,6 +10,7 @@ import { query } from "../db";
 import { type Activity, mockActivity } from "../mock-data";
 import { ActivityQuery, ActivityQueryResult, filterActivityEvents } from "./query";
 import { ActivityEvent } from "./types";
+import { recordDurableActivityEvent } from "./hash-chain";
 import {
   DurableIdempotencyStore,
   FileIdempotencyStore,
@@ -39,6 +40,8 @@ interface ActivityStorageOptions {
   maxEvents?: number;
   ttlSeconds?: number;
 }
+
+const DEFAULT_ACTIVITY_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * Convert old-style mock activities to new ActivityEvent format.
@@ -255,10 +258,12 @@ export class FileActivityStorage implements IActivityStorage {
 export class DurableActivityStorage implements IActivityStorage {
   private readonly idempotencyStore: DurableIdempotencyStore;
   private readonly maxEvents: number;
+  private readonly ttlSeconds: number;
 
   constructor(options: ActivityStorageOptions = {}) {
     this.idempotencyStore = new DurableIdempotencyStore(options.ttlSeconds);
     this.maxEvents = options.maxEvents ?? 1000;
+    this.ttlSeconds = options.ttlSeconds ?? DEFAULT_ACTIVITY_TTL_SECONDS;
   }
 
   async addEvent(event: ActivityEvent): Promise<void> {
@@ -268,7 +273,7 @@ export class DurableActivityStorage implements IActivityStorage {
   async getEvents(limit?: number): Promise<ActivityEvent[]> {
     const queryLimit = limit ? `LIMIT ${limit}` : "";
     const result = await query(
-      `SELECT * FROM activity_events ORDER BY timestamp DESC ${queryLimit}`,
+      `SELECT * FROM activity_events ORDER BY timestamp DESC, chain_sequence DESC ${queryLimit}`,
     );
     return result.rows.map((row) => rowToActivityEvent(row));
   }
@@ -291,32 +296,7 @@ export class DurableActivityStorage implements IActivityStorage {
   }
 
   async recordActivityEvent(event: ActivityEvent): Promise<ActivityWriteResult> {
-    const result = await this.recordProcessedEvent(event.id);
-    if (result === "duplicate") {
-      return "duplicate";
-    }
-
-    await query(
-      `INSERT INTO activity_events (
-        id, type, source, severity, actor, timestamp, description, entity, metadata, changes, schema_version
-      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
-      ON CONFLICT (id) DO NOTHING`,
-      [
-        event.id,
-        event.type,
-        event.source,
-        event.severity,
-        JSON.stringify(event.actor),
-        event.timestamp,
-        event.description,
-        event.entity ? JSON.stringify(event.entity) : null,
-        event.metadata ? JSON.stringify(event.metadata) : null,
-        event.changes ? JSON.stringify(event.changes) : null,
-        event.schemaVersion,
-      ],
-    );
-
-    return "recorded";
+    return recordDurableActivityEvent(event, this.ttlSeconds);
   }
 }
 
