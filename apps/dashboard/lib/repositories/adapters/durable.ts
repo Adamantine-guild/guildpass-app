@@ -34,6 +34,7 @@ import type {
   ActivityEventInput,
 } from "../types";
 import type { Pass, Guild, Member } from "../../mock-data";
+import { DEFAULT_GUILD_ID } from "../../mock-data";
 import type { ActivityEvent } from "@/lib/activity/types";
 import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import type { DashboardSettings } from "../../settings";
@@ -112,6 +113,7 @@ abstract class DurableRepository {
    * Compute and record a field-level audit diff after a mutation.
    */
   protected async recordDiff(
+    guildId: string,
     previous: Record<string, unknown> | object,
     next: Record<string, unknown> | object,
     type: ActivityEvent["type"],
@@ -125,7 +127,7 @@ abstract class DurableRepository {
     const nextRecord = next as Record<string, unknown>;
     const changes = computeDiff(previousRecord, nextRecord);
     if (changes.length === 0 && Object.keys(previousRecord).length > 0) return;
-    await this.activityRepo.append({
+    await this.activityRepo.append(guildId, {
       type,
       source: "dashboard",
       severity: "info",
@@ -340,6 +342,7 @@ export class DurablePassRepository
       };
       this.passes.set(id, newPass);
       await this.recordDiff(
+        guildId,
         {},
         newPass,
         "pass.created",
@@ -367,6 +370,7 @@ export class DurablePassRepository
       );
       const created = rowToPass(result.rows[0]);
       await this.recordDiff(
+        guildId,
         {},
         created,
         "pass.created",
@@ -395,6 +399,7 @@ export class DurablePassRepository
       };
       this.passes.set(id, updated);
       await this.recordDiff(
+        guildId,
         existing,
         updated,
         "pass.updated",
@@ -445,6 +450,7 @@ export class DurablePassRepository
       );
       const updated = rowToPass(updateResult.rows[0]);
       await this.recordDiff(
+        guildId,
         old,
         updated,
         "pass.updated",
@@ -463,6 +469,7 @@ export class DurablePassRepository
       if (!existing) return false;
       this.passes.delete(id);
       await this.recordDiff(
+        guildId,
         existing,
         {},
         "pass.deleted",
@@ -487,6 +494,7 @@ export class DurablePassRepository
         id,
       ]);
       await this.recordDiff(
+        guildId,
         old,
         {},
         "pass.deleted",
@@ -591,6 +599,7 @@ export class DurableGuildRepository
         };
         this.guilds.set(id, newGuild);
         await this.recordDiff(
+          id,
           {},
           newGuild,
           "guild.created",
@@ -610,6 +619,7 @@ export class DurableGuildRepository
       );
       const created = rowToGuild(result.rows[0]);
       await this.recordDiff(
+        created.id,
         {},
         created,
         "guild.created",
@@ -633,6 +643,7 @@ export class DurableGuildRepository
         const updated = { ...existing, ...patch, id };
         this.guilds.set(id, updated);
         await this.recordDiff(
+          id,
           existing,
           updated,
           "guild.updated",
@@ -676,6 +687,7 @@ export class DurableGuildRepository
       const updated = await this.getById(id);
       if (!updated) return null;
       await this.recordDiff(
+        id,
         existing,
         updated,
         "guild.updated",
@@ -695,6 +707,7 @@ export class DurableGuildRepository
         if (!existing) return false;
         this.guilds.delete(id);
         await this.recordDiff(
+          id,
           existing,
           {},
           "guild.deleted",
@@ -713,6 +726,7 @@ export class DurableGuildRepository
 
       await query("DELETE FROM guilds WHERE id = $1", [id]);
       await this.recordDiff(
+        id,
         existing,
         {},
         "guild.deleted",
@@ -878,6 +892,7 @@ export class DurableMemberRepository
         this.members.set(id, newMember);
         this.walletIndex.set(this.walletKey(guildId, member.wallet), id);
         await this.recordDiff(
+          guildId,
           {},
           newMember,
           "member.joined",
@@ -907,6 +922,7 @@ export class DurableMemberRepository
       );
       const created = rowToMember(result.rows[0]);
       await this.recordDiff(
+        guildId,
         {},
         created,
         "member.joined",
@@ -966,7 +982,7 @@ export class DurableMemberRepository
           const desc = hasRoleChange
             ? `${updated.name}'s roles changed`
             : `Member ${updated.name} updated`;
-          await this.activityRepo.append({
+          await this.activityRepo.append(guildId, {
             type: eventType,
             source: "dashboard",
             severity: "info",
@@ -1037,7 +1053,7 @@ export class DurableMemberRepository
         const desc = hasRoleChange
           ? `${updated.name}'s roles changed`
           : `Member ${updated.name} updated`;
-        await this.activityRepo.append({
+        await this.activityRepo.append(guildId, {
           type: eventType,
           source: "dashboard",
           severity: "info",
@@ -1062,6 +1078,7 @@ export class DurableMemberRepository
         );
         this.members.delete(id);
         await this.recordDiff(
+          guildId,
           existing,
           {},
           "member.left",
@@ -1083,6 +1100,7 @@ export class DurableMemberRepository
         id,
       ]);
       await this.recordDiff(
+        guildId,
         existing,
         {},
         "member.left",
@@ -1127,12 +1145,17 @@ export class DurableActivityRepository
   implements IActivityRepository
 {
   private events: ActivityEvent[] = [];
+  /** eventId -> owning guildId (mock branch only). Not part of the public ActivityEvent shape. */
+  private eventGuildIds: Map<string, string> = new Map();
   private processedIds: Set<string> = new Set();
 
   async append(
+    guildId: string,
     event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> &
       Partial<Pick<ActivityEvent, "schemaVersion">>,
   ): Promise<ActivityEvent> {
+    if (!guildId) throw new Error("append requires a guildId scope");
+
     if (this.isMock) {
       const fullEvent: ActivityEvent = {
         ...event,
@@ -1142,6 +1165,7 @@ export class DurableActivityRepository
           event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
       this.events.unshift(fullEvent);
+      this.eventGuildIds.set(fullEvent.id, guildId);
       this.processedIds.add(fullEvent.id);
       return fullEvent;
     }
@@ -1157,15 +1181,41 @@ export class DurableActivityRepository
       timestamp: now,
       schemaVersion,
     });
+    const result = await query(
+      `INSERT INTO activity_events (id, guild_id, type, source, severity, actor, timestamp, description, entity, metadata, changes, schema_version)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12) RETURNING *`,
+      [
+        id,
+        guildId,
+        event.type,
+        event.source,
+        event.severity,
+        JSON.stringify(event.actor),
+        now,
+        event.description,
+        event.entity ? JSON.stringify(event.entity) : null,
+        event.metadata ? JSON.stringify(event.metadata) : null,
+        event.changes ? JSON.stringify(event.changes) : null,
+        schemaVersion,
+      ],
+    );
+
+    await query(
+      "INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING",
+      [id],
+    );
+    return rowToActivityEvent(result.rows[0]);
   }
 
-  async query(options?: {
+  async query(guildId: string, options?: {
     limit?: number;
     type?: ActivityEvent["type"];
     since?: string;
   }): Promise<ActivityEvent[]> {
+    if (!guildId) throw new Error("query requires a guildId scope");
+
     if (this.isMock) {
-      let filtered = [...this.events];
+      let filtered = this.events.filter((e) => this.eventGuildIds.get(e.id) === guildId);
       if (options?.type) {
         filtered = filtered.filter((e) => e.type === options.type);
       }
@@ -1181,9 +1231,9 @@ export class DurableActivityRepository
       return filtered;
     }
 
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let idx = 1;
+    const conditions: string[] = ["guild_id = $1"];
+    const params: any[] = [guildId];
+    let idx = 2;
 
     if (options?.type) {
       conditions.push(`type = $${idx}`);
@@ -1197,8 +1247,7 @@ export class DurableActivityRepository
       idx++;
     }
 
-    const where =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const where = `WHERE ${conditions.join(" AND ")}`;
     const limit = options?.limit ? `LIMIT $${idx}` : "";
     if (options?.limit) params.push(options.limit);
 
@@ -1292,7 +1341,11 @@ export class DurableSettingsRepository
           ...this.settings,
           ...publicPatch,
         } as DashboardSettings;
+        // Settings are a single workspace-level document, not yet guild-scoped
+        // (see docs/multi-tenancy.md) — tagged under the default guild until
+        // settings gain per-guild scope.
         await this.recordDiff(
+          DEFAULT_GUILD_ID,
           previous,
           this.settings,
           "guild.updated",
@@ -1351,7 +1404,11 @@ export class DurableSettingsRepository
       }
 
       const updated = await this.get();
+      // Settings are a single workspace-level document, not yet guild-scoped
+      // (see docs/multi-tenancy.md) — tagged under the default guild until
+      // settings gain per-guild scope.
       await this.recordDiff(
+        DEFAULT_GUILD_ID,
         previous,
         updated,
         "guild.updated",

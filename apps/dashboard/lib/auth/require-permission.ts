@@ -70,7 +70,7 @@ export async function requireSessionAndPermission(
 }
 
 function recordPermissionDenied(session: Session, guildId: string, permission: Permission): void {
-  void recordDashboardActivity({
+  void recordDashboardActivity(guildId, {
     type: "activity.permission_denied",
     severity: "warning",
     actor: { id: session.userId, name: session.name },

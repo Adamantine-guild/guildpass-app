@@ -16,7 +16,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "settings:write");
+  const guildId = getActiveGuildId(request);
+  const guard = await requireSessionAndPermission(request, guildId, "settings:write");
   if (!guard.ok) return guard.response;
   const { session } = guard;
 
@@ -36,7 +37,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 
   return handleApiError(async () => {
     const updated = await getSettingsRepository().update(validation.value);
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "settings.updated",
       actor: { id: session.userId, name: session.name },
       description: "Dashboard settings updated",

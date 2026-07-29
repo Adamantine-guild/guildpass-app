@@ -9,6 +9,7 @@ import {
   activityRepositoryContract,
   passRepositoryIsolationContract,
   memberRepositoryIsolationContract,
+  activityRepositoryIsolationContract,
 } from "./contracts";
 import {
   DurablePassRepository,
@@ -82,4 +83,5 @@ if (!connectionString) {
 
   passRepositoryIsolationContract(getPassRepo);
   memberRepositoryIsolationContract(getMemberRepo);
+  activityRepositoryIsolationContract(getActivityRepo);
 }

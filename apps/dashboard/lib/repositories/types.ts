@@ -209,18 +209,29 @@ export interface IMemberRepository {
 /**
  * Repository for managing activity events.
  * Supports append-only semantics for audit trail.
+ *
+ * Multi-tenant isolation guarantee: `append` and `query` require an explicit
+ * `guildId` scope as their first parameter — omitting it is a compile error,
+ * not a runtime possibility, matching {@link IPassRepository} and
+ * {@link IMemberRepository}. `query` never returns another guild's events.
+ * See docs/multi-tenancy.md.
+ *
+ * `hasProcessed`/`markProcessed` are webhook idempotency bookkeeping keyed by
+ * opaque event id, not a member/pass/activity data query, so they remain
+ * workspace-wide.
  */
 export interface IActivityRepository {
   /**
-   * Append an activity event. `schemaVersion` defaults to the current version
-   * when omitted.
+   * Append an activity event owned by the given guild. `schemaVersion`
+   * defaults to the current version when omitted.
    */
-  append(event: ActivityEventInput): Promise<ActivityEvent>;
+  append(guildId: string, event: ActivityEventInput): Promise<ActivityEvent>;
 
   /**
-   * Query activity events with optional filtering.
+   * Query the guild's activity events with optional filtering. Never returns
+   * events recorded under a different guild.
    */
-  query(options?: {
+  query(guildId: string, options?: {
     limit?: number;
     type?: ActivityEvent["type"];
     since?: string; // ISO date

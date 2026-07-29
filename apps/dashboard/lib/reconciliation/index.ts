@@ -166,7 +166,7 @@ async function recordReconciliationAudit(
     .map((d) => `${d.field}: ${d.storedValue} → ${d.actualValue}`)
     .join("; ");
 
-  await activityRepo.append({
+  await activityRepo.append(guildId, {
     type: "guild.updated",
     source: "dashboard",
     severity: "warning",

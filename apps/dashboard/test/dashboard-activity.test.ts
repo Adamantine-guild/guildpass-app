@@ -20,7 +20,7 @@ describe("recordDashboardActivity", () => {
   beforeEach(() => clearRepositories());
 
   test("creates a pass.created event with actor, entity, source, severity, and timestamp", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "pass.created",
       entity: { type: "pass", id: "p1", name: "Test Pass" },
       actor: { name: "Admin", id: "admin-001" },
@@ -40,7 +40,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("pass.updated event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "pass.updated",
       entity: { type: "pass", id: "p1", name: "Test Pass" },
       actor: { name: "Admin" },
@@ -52,7 +52,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("pass.deleted event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "pass.deleted",
       entity: { type: "pass", id: "p1", name: "Test Pass" },
       actor: { name: "Admin" },
@@ -64,7 +64,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("member.roles_changed event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "member.roles_changed",
       entity: { type: "member", id: "m1", name: "Alice" },
       actor: { name: "Admin" },
@@ -76,7 +76,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("member.left event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "member.left",
       entity: { type: "member", id: "m1", name: "Alice" },
       actor: { name: "Admin" },
@@ -88,7 +88,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("member.joined event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "member.joined",
       entity: { type: "member", id: "m1", name: "Alice" },
       actor: { name: "Admin" },
@@ -99,7 +99,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("guild.created event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "guild.created",
       entity: { type: "guild", id: "g1", name: "New Guild" },
       actor: { name: "Admin" },
@@ -110,7 +110,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("guild.updated event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "guild.updated",
       entity: { type: "guild", id: "g1", name: "Updated Guild" },
       actor: { name: "Admin" },
@@ -121,7 +121,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("guild.deleted event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "guild.deleted",
       entity: { type: "guild", id: "g1", name: "Old Guild" },
       actor: { name: "Admin" },
@@ -132,7 +132,7 @@ describe("recordDashboardActivity", () => {
   });
 
   test("settings.updated event", async () => {
-    const event = await recordDashboardActivity({
+    const event = await recordDashboardActivity(GUILD, {
       type: "settings.updated",
       actor: { name: "Admin" },
       description: "Dashboard settings updated",
@@ -145,13 +145,13 @@ describe("recordDashboardActivity", () => {
   });
 
   test("events persist and are queryable via activity repository", async () => {
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "pass.created",
       entity: { type: "pass", id: "p_query", name: "Query Test" },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({});
+    const events = await getActivityRepository().query(GUILD, {});
     assert.ok(events.length >= 1);
     const found = events.find((e) => e.entity?.id === "p_query");
     assert.ok(found, "event should be stored and retrievable");
@@ -159,19 +159,19 @@ describe("recordDashboardActivity", () => {
   });
 
   test("multiple events are stored with correct ordering", async () => {
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "pass.created",
       entity: { type: "pass", id: "p_first", name: "First" },
       actor: { name: "Admin" },
     });
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "pass.created",
       entity: { type: "pass", id: "p_second", name: "Second" },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({});
+    const events = await getActivityRepository().query(GUILD, {});
     const firstIndex = events.findIndex((e) => e.entity?.id === "p_first");
     const secondIndex = events.findIndex((e) => e.entity?.id === "p_second");
     assert.ok(firstIndex >= 0, "first event should exist");
@@ -187,7 +187,7 @@ describe("recordDashboardActivity", () => {
     ];
 
     for (const type of types) {
-      const event = await recordDashboardActivity({
+      const event = await recordDashboardActivity(GUILD, {
         type,
         entity: type === "settings.updated" ? undefined : { type: type.startsWith("pass") ? "pass" : type.startsWith("member") ? "member" : "guild", id: "test" },
         actor: { name: "Tester" },
@@ -197,13 +197,13 @@ describe("recordDashboardActivity", () => {
   });
 
   test("failed mutations do not record activity events", async () => {
-    const before = await getActivityRepository().query({});
+    const before = await getActivityRepository().query(GUILD, {});
 
     const repo = getPassRepository();
     const result = await repo.update(GUILD, "nonexistent", { name: "test" });
     assert.equal(result, null, "update of non-existent pass returns null");
 
-    const after = await getActivityRepository().query({});
+    const after = await getActivityRepository().query(GUILD, {});
     assert.equal(after.length, before.length, "no activity event should be recorded for a failed update");
   });
 
@@ -216,13 +216,13 @@ describe("recordDashboardActivity", () => {
       currentSupply: 0,
     });
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "pass.created",
       entity: { type: "pass", id: created.id, name: created.name },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({ type: "pass.created" });
+    const events = await getActivityRepository().query(GUILD, { type: "pass.created" });
     const found = events.find((e) => e.entity?.id === created.id);
     assert.ok(found, "pass created event should exist");
     assert.equal(found?.entity?.name, "Integration Pass");
@@ -240,13 +240,13 @@ describe("recordDashboardActivity", () => {
     const updated = await repo.update(GUILD, created.id, { status: "active" });
     assert.ok(updated);
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "pass.updated",
       entity: { type: "pass", id: updated!.id, name: updated!.name },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({ type: "pass.updated" });
+    const events = await getActivityRepository().query(GUILD, { type: "pass.updated" });
     const found = events.find((e) => e.entity?.id === created.id);
     assert.ok(found, "pass updated event should exist");
   });
@@ -263,13 +263,13 @@ describe("recordDashboardActivity", () => {
     const deleted = await repo.delete(GUILD, created.id);
     assert.equal(deleted, true);
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "pass.deleted",
       entity: { type: "pass", id: created.id, name: created.name },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({ type: "pass.deleted" });
+    const events = await getActivityRepository().query(GUILD, { type: "pass.deleted" });
     const found = events.find((e) => e.entity?.id === created.id);
     assert.ok(found, "pass deleted event should exist");
   });
@@ -288,13 +288,13 @@ describe("recordDashboardActivity", () => {
     const updated = await repo.update(GUILD, created.id, { roles: ["member", "contributor"] });
     assert.ok(updated);
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "member.roles_changed",
       entity: { type: "member", id: updated!.id, name: updated!.name },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({ type: "member.roles_changed" });
+    const events = await getActivityRepository().query(GUILD, { type: "member.roles_changed" });
     const found = events.find((e) => e.entity?.id === created.id);
     assert.ok(found, "member roles_changed event should exist");
   });
@@ -313,13 +313,13 @@ describe("recordDashboardActivity", () => {
     const deleted = await repo.delete(GUILD, created.id);
     assert.equal(deleted, true);
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "member.left",
       entity: { type: "member", id: created.id, name: created.name },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({ type: "member.left" });
+    const events = await getActivityRepository().query(GUILD, { type: "member.left" });
     const found = events.find((e) => e.entity?.id === created.id);
     assert.ok(found, "member left event should exist");
   });
@@ -336,13 +336,13 @@ describe("recordDashboardActivity", () => {
     const updated = await repo.update(created.id, { description: "Updated description" });
     assert.ok(updated);
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(GUILD, {
       type: "guild.updated",
       entity: { type: "guild", id: updated!.id, name: updated!.name },
       actor: { name: "Admin" },
     });
 
-    const events = await getActivityRepository().query({ type: "guild.updated" });
+    const events = await getActivityRepository().query(GUILD, { type: "guild.updated" });
     const found = events.find((e) => e.entity?.id === created.id);
     assert.ok(found, "guild updated event should exist");
   });
