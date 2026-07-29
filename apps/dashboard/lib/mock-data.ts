@@ -1,43 +1,9 @@
-import type { ActivityChange, ActivityEvent } from "@guildpass/integration-client";
+import type { ActivityChange, ActivityEvent, Guild, Member, Pass } from "@guildpass/integration-client";
 import type { ActivityQuery } from "./activity/query";
 import { readApiResult } from "./api-client";
 import { GUILD_ID_HEADER } from "./guild-context";
 
-export interface Pass {
-  id: string;
-  /** Owning guild (tenant). Every pass belongs to exactly one guild. */
-  guildId: string;
-  name: string;
-  description: string;
-  status: "active" | "inactive" | "draft";
-  price?: number;
-  maxSupply?: number | null;
-  currentSupply: number;
-  createdAt: string;
-}
-
-export interface Guild {
-  id: string;
-  name: string;
-  description: string;
-  memberCount: number;
-  passCount: number;
-  createdAt: string;
-}
-
-export interface Member {
-  id: string;
-  /** Owning guild (tenant). Every member record belongs to exactly one guild. */
-  guildId: string;
-  wallet: string;
-  name: string;
-  status: "active" | "inactive" | "pending";
-  roles: string[];
-  joinedAt: string;
-  lastActive: string;
-  /** Monotonically increasing version number for optimistic concurrency control. */
-  version: number;
-}
+export type { Guild, Member, Pass };
 
 export interface Activity {
   id: string;
