@@ -205,6 +205,52 @@ import {
 } from "@guildpass/integration-client";
 ```
 
+## Shared domain types
+
+`Pass`, `Guild`, and `Member` are the canonical shapes for these entities,
+shared between `apps/dashboard` and `apps/discord-bot` so the two apps can't
+drift apart:
+
+```ts
+import type { Pass, Guild, Member } from "@guildpass/integration-client";
+
+type Pass = {
+  id: string;
+  guildId: string;
+  name: string;
+  description: string;
+  status: "active" | "inactive" | "draft";
+  price?: number;
+  maxSupply?: number | null;
+  currentSupply: number;
+  createdAt: string;
+};
+
+type Guild = {
+  id: string;
+  name: string;
+  description: string;
+  memberCount: number;
+  passCount: number;
+  createdAt: string;
+};
+
+type Member = {
+  id: string;
+  guildId: string;
+  wallet: string;
+  name: string;
+  status: "active" | "inactive" | "pending";
+  roles: string[];
+  joinedAt: string;
+  lastActive: string;
+  version: number; // optimistic concurrency control
+};
+```
+
+The audit/event equivalent is `ActivityEvent` (see below), which models a
+single logged activity item rather than a core entity.
+
 ## ActivityEvent schema versioning
 
 `ActivityEvent` carries an explicit `schemaVersion` field so that historical
