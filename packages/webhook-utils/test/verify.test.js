@@ -470,6 +470,86 @@ describe("verifySignature", () => {
       assert.match(source, /signatureBuffer\.length !== expectedBuffer\.length/);
     });
   });
+
+  describe("Additional edge cases", () => {
+    test("should reject header with duplicate v1 values where the trailing value is bogus", () => {
+      const { signature } = generateSignature({ secret: SECRET, payload: PAYLOAD });
+      const [tPart, v1Part] = signature.split(",");
+      const bogusV1 = `v1=${"a".repeat(64)}`;
+      const headerWithDuplicateV1 = `${tPart},${v1Part},${bogusV1}`;
+
+      const result = verifySignature({
+        signatureHeader: headerWithDuplicateV1,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should reject header with timestamp present but signature value made only of whitespace", () => {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const result = verifySignature({
+        signatureHeader: `t=${timestamp},v1=   `,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should reject signature verified against a semantically equal but differently serialized payload", () => {
+      const orderedPayload = JSON.stringify({ event: "member.joined", memberId: "123" });
+      const reorderedPayload = JSON.stringify({ memberId: "123", event: "member.joined" });
+
+      const { signature } = generateSignature({ secret: SECRET, payload: orderedPayload });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: reorderedPayload,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should accept timestamp exactly at the tolerance boundary", () => {
+      const boundaryTimestamp = Math.floor(Date.now() / 1000) - 300;
+      const { signature } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+        timestamp: boundaryTimestamp,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, true);
+    });
+
+    test("should reject timestamp exactly one second outside the tolerance boundary", () => {
+      const justOutsideTimestamp = Math.floor(Date.now() / 1000) - 301;
+      const { signature } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+        timestamp: justOutsideTimestamp,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error.includes("too old"));
+    });
+  });
 });
 
 describe("generateSignature", () => {
