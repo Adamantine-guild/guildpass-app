@@ -62,6 +62,10 @@ function readPageFilter(value: string | null): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
 }
 
+function readDateFilter(value: string | null): string {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+}
+
 function MembersPageContent() {
   const session = useSession();
   const canWrite = canManageMembers(session, session.activeGuildId);
@@ -84,6 +88,8 @@ function MembersPageContent() {
   const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
   const [status, setStatus] = useState<MemberStatusFilter>(() => readStatusFilter(searchParams.get("status")));
   const [role, setRole] = useState<MemberRoleFilter>(() => readRoleFilter(searchParams.get("role")));
+  const [joinedFrom, setJoinedFrom] = useState(() => readDateFilter(searchParams.get("joinedFrom")));
+  const [joinedTo, setJoinedTo] = useState(() => readDateFilter(searchParams.get("joinedTo")));
   const [page, setPage] = useState(() => readPageFilter(searchParams.get("page")));
   const debouncedSearch = useDebouncedValue(search, 250);
   const previousMembersRef = useRef<MockMember[]>(members);
@@ -94,8 +100,10 @@ function MembersPageContent() {
       search: debouncedSearch.trim() || undefined,
       status: status === "all" ? undefined : status,
       role: role === "all" ? undefined : role,
+      joinedFrom: joinedFrom || undefined,
+      joinedTo: joinedTo || undefined,
     }),
-    [debouncedSearch, guildId, page, role, status]
+    [debouncedSearch, guildId, joinedFrom, joinedTo, page, role, status]
   );
   const cacheRevision = useQueryInvalidation(membersQueryKey);
 
@@ -105,7 +113,15 @@ function MembersPageContent() {
   const [walletError, setWalletError] = useState<string | null>(null);
 
   const updateFilterQuery = useCallback(
-    (updates: { search?: string; status?: MemberStatusFilter; role?: MemberRoleFilter; guild?: string; page?: number | null }) => {
+    (updates: {
+      search?: string;
+      status?: MemberStatusFilter;
+      role?: MemberRoleFilter;
+      joinedFrom?: string;
+      joinedTo?: string;
+      guild?: string;
+      page?: number | null;
+    }) => {
       const next = new URLSearchParams(searchParams.toString());
 
       if (updates.search !== undefined) {
@@ -128,6 +144,20 @@ function MembersPageContent() {
           next.delete("role");
         } else {
           next.set("role", updates.role);
+        }
+      }
+      if (updates.joinedFrom !== undefined) {
+        if (updates.joinedFrom) {
+          next.set("joinedFrom", updates.joinedFrom);
+        } else {
+          next.delete("joinedFrom");
+        }
+      }
+      if (updates.joinedTo !== undefined) {
+        if (updates.joinedTo) {
+          next.set("joinedTo", updates.joinedTo);
+        } else {
+          next.delete("joinedTo");
         }
       }
       if (updates.guild !== undefined) {
@@ -169,6 +199,18 @@ function MembersPageContent() {
     updateFilterQuery({ role: value, page: null });
   };
 
+  const handleJoinedFromChange = (value: string) => {
+    setJoinedFrom(value);
+    setPage(1);
+    updateFilterQuery({ joinedFrom: value, page: null });
+  };
+
+  const handleJoinedToChange = (value: string) => {
+    setJoinedTo(value);
+    setPage(1);
+    updateFilterQuery({ joinedTo: value, page: null });
+  };
+
   const handleGuildFilterChange = (value: string) => {
     setGuildId(value);
     setPage(1);
@@ -185,20 +227,24 @@ function MembersPageContent() {
     const nextSearch = searchParams.get("search") ?? "";
     const nextStatus = readStatusFilter(searchParams.get("status"));
     const nextRole = readRoleFilter(searchParams.get("role"));
+    const nextJoinedFrom = readDateFilter(searchParams.get("joinedFrom"));
+    const nextJoinedTo = readDateFilter(searchParams.get("joinedTo"));
     const nextPage = readPageFilter(searchParams.get("page"));
     const nextGuildId = searchParams.get("guild");
 
     if (nextSearch !== search) setSearch(nextSearch);
     if (nextStatus !== status) setStatus(nextStatus);
     if (nextRole !== role) setRole(nextRole);
+    if (nextJoinedFrom !== joinedFrom) setJoinedFrom(nextJoinedFrom);
+    if (nextJoinedTo !== joinedTo) setJoinedTo(nextJoinedTo);
     if (nextPage !== page) setPage(nextPage);
     if (nextGuildId && nextGuildId !== guildId && guilds.some((candidate) => candidate.id === nextGuildId)) {
       setGuildId(nextGuildId);
     }
-  }, [guildId, guilds, page, role, search, searchParams, setGuildId, status]);
+  }, [guildId, guilds, joinedFrom, joinedTo, page, role, search, searchParams, setGuildId, status]);
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, role, status, guildId]);
+  }, [debouncedSearch, role, status, joinedFrom, joinedTo, guildId]);
 
   // Drop previous tenant's rows immediately so the UI never shows stale data.
   useEffect(() => {
@@ -226,6 +272,8 @@ function MembersPageContent() {
         if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
         if (status !== "all") params.set("status", status);
         if (role !== "all") params.set("role", role);
+        if (joinedFrom) params.set("joinedFrom", joinedFrom);
+        if (joinedTo) params.set("joinedTo", joinedTo);
 
         const data = await dashboardQueryCache.fetchQuery(membersQueryKey, async () => {
           const res = await guildFetch(`/api/members?${params.toString()}`, guildId);
@@ -253,7 +301,7 @@ function MembersPageContent() {
     return () => {
       mounted = false;
     };
-  }, [apiMode, cacheRevision, debouncedSearch, guildId, membersQueryKey, page, role, status]);
+  }, [apiMode, cacheRevision, debouncedSearch, guildId, joinedFrom, joinedTo, membersQueryKey, page, role, status]);
 
   const updateMutation = useOptimisticMutation<MockMember, { id: string; data: Partial<MockMember> & { version?: number } }>({
     mutationFn: async ({ id, data }) => {
@@ -470,6 +518,42 @@ function MembersPageContent() {
               </button>
             ))}
           </div>
+
+          {/* Join-date range row */}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Joined from
+              <input
+                type="date"
+                value={joinedFrom}
+                max={joinedTo || undefined}
+                onChange={(event) => handleJoinedFromChange(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              to
+              <input
+                type="date"
+                value={joinedTo}
+                min={joinedFrom || undefined}
+                onChange={(event) => handleJoinedToChange(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+            </label>
+            {(joinedFrom || joinedTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleJoinedFromChange("");
+                  handleJoinedToChange("");
+                }}
+                className="text-sm font-medium text-violet-600 hover:text-violet-700"
+              >
+                Clear dates
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -609,7 +693,7 @@ function MembersPageContent() {
 
           {members.length === 0 && (
             <div className="mt-4">
-              <EmptyState title="No members match your filters" description="Adjust the search, guild, status, or role filter to see more members." icon="-" />
+              <EmptyState title="No members match your filters" description="Adjust the search, guild, status, role, or join date filters to see more members." icon="-" />
             </div>
           )}
 

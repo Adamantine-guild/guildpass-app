@@ -820,6 +820,26 @@ export class DurableMemberRepository
       paramIdx++;
     }
 
+    if (options.joinedFrom) {
+      const { parseDateBoundary } = await import("@/lib/pagination");
+      const from = parseDateBoundary(options.joinedFrom, "start");
+      if (from !== null) {
+        conditions.push(`joined_at >= $${paramIdx}`);
+        params.push(new Date(from).toISOString());
+        paramIdx++;
+      }
+    }
+
+    if (options.joinedTo) {
+      const { parseDateBoundary } = await import("@/lib/pagination");
+      const to = parseDateBoundary(options.joinedTo, "end");
+      if (to !== null) {
+        conditions.push(`joined_at <= $${paramIdx}`);
+        params.push(new Date(to).toISOString());
+        paramIdx++;
+      }
+    }
+
     const where = conditions.join(" AND ");
     const countResult = await query(
       `SELECT COUNT(*)::integer as count FROM members WHERE ${where}`,

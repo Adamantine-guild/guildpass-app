@@ -55,6 +55,9 @@ export function filterPasses(passes: Pass[], query: PassListQuery = {}): Pass[] 
 
 export function filterMembers(members: Member[], query: MemberListQuery = {}): Member[] {
   const search = normaliseSearch(query.search);
+  const joinedFrom = parseDateBoundary(query.joinedFrom, "start");
+  const joinedTo = parseDateBoundary(query.joinedTo, "end");
+
   return members.filter((member) => {
     const matchesSearch =
       !search ||
@@ -64,9 +67,26 @@ export function filterMembers(members: Member[], query: MemberListQuery = {}): M
       !query.status || query.status === "all" || member.status === query.status;
     const matchesRole =
       !query.role || query.role === "all" || member.roles.includes(query.role);
+    const joinedAtTime = new Date(member.joinedAt).getTime();
+    const matchesJoinedFrom = joinedFrom === null || joinedAtTime >= joinedFrom;
+    const matchesJoinedTo = joinedTo === null || joinedAtTime <= joinedTo;
 
-    return matchesSearch && matchesStatus && matchesRole;
+    return matchesSearch && matchesStatus && matchesRole && matchesJoinedFrom && matchesJoinedTo;
   });
+}
+
+/**
+ * Resolves a `YYYY-MM-DD` (or full ISO) date-range bound to an epoch ms
+ * timestamp. Date-only strings are widened to the start/end of that day so a
+ * `joinedTo` filter includes every member who joined on that calendar date,
+ * not just at midnight. Invalid/missing input yields `null` (no bound).
+ */
+export function parseDateBoundary(value: string | undefined, edge: "start" | "end"): number | null {
+  if (!value) return null;
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const iso = isDateOnly ? `${value}T${edge === "start" ? "00:00:00.000" : "23:59:59.999"}Z` : value;
+  const time = new Date(iso).getTime();
+  return Number.isNaN(time) ? null : time;
 }
 
 export function parseListLimit(value: string | null): number | undefined {

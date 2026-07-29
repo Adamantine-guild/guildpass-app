@@ -126,6 +126,8 @@ function parseMemberListQuery(request: Request): MemberListQuery {
     search: searchParams.get("search") ?? undefined,
     status: isMemberStatus(status) ? status : "all",
     role: role && isMemberRole(role) ? role : "all",
+    joinedFrom: searchParams.get("joinedFrom") ?? undefined,
+    joinedTo: searchParams.get("joinedTo") ?? undefined,
     limit: parseListLimit(searchParams.get("limit")),
     page: parseListPage(searchParams.get("page")),
     cursor: searchParams.get("cursor"),
