@@ -2,6 +2,45 @@
 
 All notable changes to the @guildpass/webhook-utils package will be documented in this file.
 
+## [0.2.0] - 2026-07-29
+
+### Added
+
+#### Outbound Webhook Delivery
+- `WebhookEvent` type — `event`, `payload`, `timestamp`, `guildId`
+- `dispatchWebhook(subscriberUrl, event, options)` — signs an event with
+  `generateSignature` and POSTs it to a subscriber URL, retrying transient
+  failures with exponential backoff and full jitter (default: 3 attempts,
+  200ms base delay)
+- Dead-letter handling: `DeadLetterStore` interface + `InMemoryDeadLetterStore`,
+  written to when a delivery exhausts all retry attempts
+- Subscriber registry: `createSubscriberRegistry(mapping)` and
+  `loadSubscriberRegistryFromEnv()` for a minimal guildId → URL(s) mock
+  config, structured to be swappable for a database-backed registry later
+- New environment variables (see `.env.example`): `WEBHOOK_DISPATCH_SECRET`,
+  `WEBHOOK_SUBSCRIBERS`, `WEBHOOK_DISPATCH_MAX_ATTEMPTS`,
+  `WEBHOOK_DISPATCH_BASE_DELAY_MS`, `WEBHOOK_DISPATCH_MAX_DELAY_MS`
+
+#### Documentation
+- README: "Outbound Webhook Delivery" section documenting the `WebhookEvent`
+  schema, the signing/verification contract, `dispatchWebhook` usage, retry
+  strategy, subscriber registry, and dead-letter handling
+
+#### Testing
+- New test suite (`test/dispatch.test.js`) covering signing/verification
+  symmetry for dispatched payloads, retry-then-succeed behavior, exponential
+  backoff with jitter, dead-letter recording after exhausted retries, and a
+  source-scan check that no secrets or subscriber URLs are hardcoded in the
+  dispatcher or registry modules
+
+### Notes
+
+- `generateSignature` is unchanged but is now documented as the production
+  signing primitive for outbound delivery, not only a testing utility —
+  signing and verification were already symmetric (same HMAC-SHA256 scheme),
+  so no new signing algorithm was introduced.
+- Still zero runtime dependencies.
+
 ## [0.1.0] - 2026-06-21
 
 ### Added

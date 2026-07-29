@@ -1,10 +1,13 @@
 # @guildpass/webhook-utils
 
-Production-ready webhook verification utilities for GuildPass integrations.
+Production-ready webhook signing, verification, and outbound delivery utilities for GuildPass integrations.
 
 ## Features
 
 - ✅ **HMAC-SHA256 signature verification** – Cryptographically secure payload validation
+- ✅ **HMAC-SHA256 signing** – Sign outbound event payloads with the same scheme subscribers verify against
+- ✅ **Outbound delivery with retries** – `dispatchWebhook` POSTs signed events with exponential backoff + jitter
+- ✅ **Dead-letter handling** – Deliveries that exhaust retries are recorded, not silently dropped
 - ✅ **Replay attack protection** – Timestamp-based validation prevents stale webhooks
 - ✅ **Timing attack resistant** – Constant-time comparison for security
 - ✅ **Zero dependencies** – Uses Node.js built-in crypto module
@@ -95,7 +98,11 @@ if (result.valid) {
 
 ### `generateSignature(options)`
 
-Generates a webhook signature for testing purposes.
+Generates a webhook signature. This is the counterpart to `verifySignature` —
+it's the same HMAC-SHA256 scheme, so a signature it produces always passes
+`verifySignature` given the same secret and payload. Use it directly to sign
+outbound requests, or via `dispatchWebhook` (below) for a full send-with-retry
+flow. It's also useful standalone for generating valid signatures in tests.
 
 #### Parameters
 
@@ -134,6 +141,158 @@ fetch('http://localhost:3000/api/webhook', {
   body: JSON.stringify({ event: 'test' })
 });
 ```
+
+## Outbound Webhook Delivery
+
+GuildPass notifies external integrations (Discord bot, third-party services)
+of guild/member/pass events by dispatching signed webhooks to subscriber
+URLs, with automatic retries and dead-letter handling for exhausted
+deliveries.
+
+### `WebhookEvent` schema
+
+Every outbound delivery carries a `WebhookEvent`:
+
+```typescript
+type WebhookEvent = {
+  event: string;                  // Dot-namespaced name, e.g. "member.joined", "pass.issued"
+  payload: Record<string, unknown>; // Event-specific data. Must not contain secrets.
+  timestamp: string;              // ISO-8601 timestamp of when the event occurred
+  guildId: string;                // The guild the event belongs to
+};
+```
+
+### Signing/verification contract
+
+`dispatchWebhook` serializes the `WebhookEvent` with `JSON.stringify` and
+signs the resulting bytes with `generateSignature`, sending the result in the
+`x-guildpass-signature` header — the identical format `verifySignature`
+expects (`t=<unix_timestamp>,v1=<hmac_sha256_signature>`). This is what makes
+signing and verification symmetric: a subscriber verifying an inbound
+delivery does
+
+```typescript
+const rawBody = await request.text(); // exact bytes GuildPass sent
+const result = verifySignature({
+  signatureHeader: request.headers.get('x-guildpass-signature'),
+  secret: process.env.WEBHOOK_DISPATCH_SECRET, // shared with the dispatcher
+  payload: rawBody,
+});
+```
+
+and it validates against the same secret configured on the dispatch side,
+with no format translation in either direction. Subscribers must parse
+`JSON.parse(rawBody)` **after** verifying, and must use the raw body bytes
+(not a re-serialized object) when verifying — see "Always Use Raw Body"
+above.
+
+### `dispatchWebhook(subscriberUrl, event, options)`
+
+Signs `event`, POSTs it to `subscriberUrl`, and retries transient failures
+(non-2xx responses or network errors) with exponential backoff and jitter.
+
+#### Parameters
+
+```typescript
+{
+  secret: string;                  // Signing secret (required)
+  retry?: {
+    maxAttempts?: number;          // Default: 3
+    baseDelayMs?: number;          // Default: 200
+    maxDelayMs?: number;           // Default: 10000
+  };
+  deadLetterStore?: DeadLetterStore; // Default: none (failures are returned, not persisted)
+  fetch?: typeof fetch;            // Default: global fetch. Override for testing.
+  sleep?: (ms: number) => Promise<void>; // Default: real timer. Override for testing.
+  random?: () => number;           // Default: Math.random. Override for deterministic tests.
+}
+```
+
+#### Returns
+
+```typescript
+{
+  delivered: boolean;
+  subscriberUrl: string;
+  event: WebhookEvent;
+  attempts: { attempt: number; startedAt: string; status?: number; error?: string }[];
+  deadLettered?: boolean; // true if delivery was exhausted and a deadLetterStore recorded it
+}
+```
+
+#### Retry strategy
+
+Backoff uses "full jitter" (delay chosen uniformly from
+`[0, min(maxDelayMs, baseDelayMs * 2^(attempt-1))]`) so that retrying
+subscribers don't all retry in lockstep after a shared outage. With the
+defaults (3 attempts, 200ms base), a failed delivery is retried twice before
+being considered exhausted.
+
+#### Example
+
+```typescript
+import {
+  dispatchWebhook,
+  createSubscriberRegistry,
+  InMemoryDeadLetterStore,
+} from '@guildpass/webhook-utils';
+
+const registry = createSubscriberRegistry({
+  guild_123: 'https://example.com/hooks/guildpass',
+});
+const deadLetterStore = new InMemoryDeadLetterStore();
+
+async function notifyGuild(guildId: string, event: Omit<WebhookEvent, 'guildId'>) {
+  const results = await Promise.all(
+    registry.getSubscriberUrls(guildId).map((url) =>
+      dispatchWebhook(url, { ...event, guildId }, {
+        secret: process.env.WEBHOOK_DISPATCH_SECRET!,
+        deadLetterStore,
+      }),
+    ),
+  );
+  return results;
+}
+
+await notifyGuild('guild_123', {
+  event: 'member.joined',
+  payload: { memberId: 'm_456' },
+  timestamp: new Date().toISOString(),
+});
+```
+
+### Subscriber registry
+
+`createSubscriberRegistry(mapping)` builds a `SubscriberRegistry` from an
+explicit `guildId -> URL | URL[]` mapping. `loadSubscriberRegistryFromEnv()`
+builds one from a JSON-encoded environment variable (`WEBHOOK_SUBSCRIBERS`
+by default) — a minimal mock config suitable for local development, meant to
+be swapped for a database-backed registry once subscribers are managed
+through the dashboard.
+
+```typescript
+import { loadSubscriberRegistryFromEnv } from '@guildpass/webhook-utils';
+
+// WEBHOOK_SUBSCRIBERS='{"guild_123":"https://example.com/hooks/guildpass"}'
+const registry = loadSubscriberRegistryFromEnv();
+```
+
+### Dead-letter handling
+
+`InMemoryDeadLetterStore` implements the `DeadLetterStore` interface
+(`record(entry)` / `list()`) and is what `dispatchWebhook` writes to when all
+retry attempts are exhausted. It's in-memory and process-local — swap in a
+persistent implementation of the same interface (database table, queue,
+etc.) for production use without changing any dispatch call sites.
+
+### Configuration
+
+All dispatch configuration is environment-driven — no secrets or subscriber
+URLs are hardcoded in this package. See `.env.example` at the repo root:
+
+- `WEBHOOK_DISPATCH_SECRET` — secret used to sign outbound deliveries (distinct from `WEBHOOK_SECRET`, which verifies *inbound* webhooks)
+- `WEBHOOK_SUBSCRIBERS` — JSON object mapping `guildId` to subscriber URL(s), consumed by `loadSubscriberRegistryFromEnv`
+- `WEBHOOK_DISPATCH_MAX_ATTEMPTS`, `WEBHOOK_DISPATCH_BASE_DELAY_MS`, `WEBHOOK_DISPATCH_MAX_DELAY_MS` — optional retry tuning
 
 ## Framework Examples
 
