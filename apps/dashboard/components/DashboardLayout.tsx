@@ -35,9 +35,14 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen flex">
       {initialGuildId ? <GuildRouteSync guildId={initialGuildId} /> : null}
-      <Sidebar session={session} />
-      <div className="flex-1 ml-64">
-        <Header title={title} subtitle={subtitle} />
+      <Sidebar session={session} isOpen={sidebarOpen} onClose={closeSidebar} />
+      <div className="flex-1 md:ml-64">
+        <Header
+          title={title}
+          subtitle={subtitle}
+          onMenuClick={toggleSidebar}
+          menuOpen={sidebarOpen}
+        />
         <main className="p-8">{children}</main>
       </div>
     </div>

@@ -1,19 +1,11 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { Session } from "@/lib/auth/session";
 import { useOptionalGuild } from "@/lib/guild/GuildProvider";
-
-const navItems = [
-  { name: "Dashboard", href: "/dashboard", icon: "📊" },
-  { name: "Passes", href: "/passes", icon: "🎫" },
-  { name: "Guilds", href: "/guilds", icon: "🏰" },
-  { name: "Members", href: "/members", icon: "👥" },
-  { name: "Activity", href: "/activity", icon: "📋" },
-  { name: "Integrations", href: "/integrations", icon: "🔌" },
-  { name: "Settings", href: "/settings", icon: "⚙️" },
-];
+import { navItems, isNavItemActive } from "@/lib/nav-items";
 
 /**
  * Human-readable label + colour for each role,
@@ -61,10 +53,28 @@ export default function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const guildCtx = useOptionalGuild();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const badge = session?.role
     ? ROLE_BADGE[session.role]
     : null;
+
+  // Mobile drawer: close on Escape and move focus to the close
+  // button so keyboard users land somewhere sensible.
+  useEffect(() => {
+    if (!isOpen || !onClose) return;
+
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleGuildChange = (nextId: string) => {
     if (!guildCtx || nextId === guildCtx.guildId) {
@@ -90,8 +100,19 @@ export default function Sidebar({
   };
 
   return (
-    <div
-      className={`
+    <>
+      {/* Mobile backdrop — click or Escape to close */}
+      {isOpen && onClose && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          aria-hidden="true"
+          onClick={onClose}
+        />
+      )}
+
+      <div
+        id="dashboard-sidebar"
+        className={`
         fixed
         left-0
         top-0
@@ -109,7 +130,7 @@ export default function Sidebar({
         ${isOpen ? "translate-x-0" : "-translate-x-full"}
         md:translate-x-0
       `}
-    >
+      >
       {/* Sidebar header */}
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-4 dark:border-slate-700">
         <div className="flex items-center gap-2 text-lg font-bold">
@@ -120,9 +141,10 @@ export default function Sidebar({
         {/* Close button — visible only on mobile */}
         {onClose && (
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 md:hidden"
+            className="inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:bg-slate-700 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 md:hidden"
             aria-label="Close sidebar"
           >
             <svg
@@ -159,7 +181,7 @@ export default function Sidebar({
             onChange={(e) =>
               handleGuildChange(e.target.value)
             }
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-slate-900"
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:bg-slate-900"
             aria-label="Select guild"
           >
             {guildCtx.guilds.map((g) => (
@@ -171,7 +193,7 @@ export default function Sidebar({
 
           <Link
             href={`/guilds/${guildCtx.guildId}`}
-            className="mt-2 inline-block text-xs text-slate-400 transition-colors hover:text-primary-300"
+            className="mt-2 inline-block rounded text-xs text-slate-400 transition-colors hover:text-primary-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
           >
             Open guild overview →
           </Link>
@@ -179,19 +201,17 @@ export default function Sidebar({
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-4">
+      <nav className="flex-1 overflow-y-auto p-4" aria-label="Primary">
         <ul className="space-y-2">
           {navItems.map((item) => {
-            const isActive =
-              pathname === item.href ||
-              (item.href !== "/" &&
-                pathname?.startsWith(item.href));
+            const isActive = isNavItemActive(pathname, item.href);
 
             return (
               <li key={item.name}>
                 <Link
                   href={item.href}
                   onClick={onClose}
+                  aria-current={isActive ? "page" : undefined}
                   className={`
                     flex
                     items-center
@@ -200,6 +220,11 @@ export default function Sidebar({
                     px-4
                     py-3
                     transition-colors
+                    focus:outline-none
+                    focus-visible:ring-2
+                    focus-visible:ring-primary-500
+                    focus-visible:ring-offset-2
+                    focus-visible:ring-offset-slate-900
                     ${
                       isActive
                         ? "bg-slate-800 font-medium text-primary-300"
@@ -239,6 +264,7 @@ export default function Sidebar({
           </span>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
