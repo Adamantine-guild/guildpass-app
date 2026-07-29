@@ -1,10 +1,15 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import IntegrationsListState, {
+  type IntegrationsListStatus,
+} from "@/components/IntegrationsListState";
 import { getServerComponentSession } from "@/lib/auth/server-session";
 import { getIntegrationsList, IntegrationStatus } from "@/lib/integrations";
+import type { IntegrationDetails } from "@/lib/integrations";
 import AccessDenied from "@/components/AccessDenied";
 import ReconcilePanel from "@/components/ReconcilePanel";
 import { hasRole } from "@/lib/permissions";
 import { formatRelativeTime } from "@/lib/format-relative-time";
+import { getApiMode } from "@/lib/env";
 
 const StatusBadge = ({ status }: { status: IntegrationStatus }) => {
   const styles: Record<IntegrationStatus, string> = {
@@ -30,7 +35,15 @@ const StatusBadge = ({ status }: { status: IntegrationStatus }) => {
   );
 };
 
-export default async function IntegrationsPage() {
+type IntegrationsPageProps = {
+  searchParams?: {
+    mockState?: string | string[];
+  };
+};
+
+export default async function IntegrationsPage({
+  searchParams,
+}: IntegrationsPageProps) {
   // 1. Fetch the actual session dynamically instead of using the hardcoded mock
   const session = await getServerComponentSession();
 
@@ -46,7 +59,25 @@ export default async function IntegrationsPage() {
   }
 
   // 3. Authorized users proceed to load the data
-  const integrations = await getIntegrationsList();
+  let integrations: IntegrationDetails[] = [];
+  let listState: IntegrationsListStatus = "loaded";
+
+  try {
+    const requestedMockState = Array.isArray(searchParams?.mockState)
+      ? searchParams.mockState[0]
+      : searchParams?.mockState;
+    const mockState = getApiMode() === "mock" ? requestedMockState : undefined;
+
+    if (mockState === "error") {
+      throw new Error("Simulated integrations fetch error");
+    }
+
+    integrations =
+      mockState === "empty" ? [] : await getIntegrationsList();
+  } catch (error) {
+    console.warn("Failed to load integrations:", error);
+    listState = "error";
+  }
 
   return (
     <DashboardLayout title="Integrations" session={session}>
@@ -59,7 +90,11 @@ export default async function IntegrationsPage() {
 
         <div className="space-y-6">
           <ReconcilePanel />
-          {integrations.map((integration) => (
+          <IntegrationsListState
+            status={listState}
+            isEmpty={integrations.length === 0}
+          />
+          {listState === "loaded" && integrations.map((integration) => (
             <div key={integration.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
               <div className="p-6">
                 <div className="flex items-start justify-between">

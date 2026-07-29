@@ -1,16 +1,18 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { getClientApiMode } from '@/lib/client-env';
+import { getClientApiMode } from "@/lib/client-env";
 import DashboardLayout from "@/components/DashboardLayout";
+import GuildsListState, {
+  type GuildsListStatus,
+} from "@/components/GuildsListState";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
-import EmptyState from "@/components/EmptyState";
 import { mockGuilds, type Guild as MockGuild } from "@/lib/mock-data";
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "@/lib/hooks/useSession";
 import { canManageGuilds } from "@/lib/permissions";
 import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
-import { readApiResult } from "@/lib/api-client";
+import { ApiClientError, readApiResult } from "@/lib/api-client";
 import { useGuild } from "@/lib/guild/GuildProvider";
 
 export default function GuildsPage() {
@@ -19,23 +21,48 @@ export default function GuildsPage() {
   const canWrite = canManageGuilds(session, activeGuildId);
   const [guilds, setGuilds] = useState<MockGuild[]>(mockGuilds);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
-  const [listState] = useState<"loading" | "loaded" | "unsupported" | "error">("loading");
+  const [listState, setListState] = useState<GuildsListStatus>("loading");
   const previousGuildsRef = useRef<MockGuild[]>(guilds);
   const apiMode = getClientApiMode();
 
   useEffect(() => {
     let mounted = true;
     async function load() {
+      setListState("loading");
+
       try {
-        const res = await fetch("/api/guilds");
-        const data = await readApiResult<MockGuild[]>(res);
+        const mockState =
+          apiMode === "mock"
+            ? new URLSearchParams(window.location.search).get("mockState")
+            : null;
+
+        if (mockState === "error") {
+          throw new Error("Simulated guild fetch error");
+        }
+
+        const data =
+          mockState === "empty"
+            ? []
+            : await fetch("/api/guilds").then((res) =>
+                readApiResult<MockGuild[]>(res)
+              );
+
         if (mounted) {
           setGuilds(data);
           setContextGuilds(data);
           previousGuildsRef.current = data;
+          setListState("loaded");
         }
       } catch (err) {
-        console.warn("Falling back to mock guilds:", err);
+        if (!mounted) return;
+
+        if (err instanceof ApiClientError && err.code === "UNSUPPORTED") {
+          setListState("unsupported");
+          return;
+        }
+
+        console.warn("Failed to load guilds:", err);
+        setListState("error");
       }
     }
     load();
@@ -131,27 +158,13 @@ export default function GuildsPage() {
         <UnsupportedBanner resource="guilds" />
       )}
 
-      {/* â”€â”€ Error banner (live mode network error) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      {listState === "error" && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 my-4">
-          <p className="text-sm text-red-700">
-            Failed to load guilds from the server. Check your API configuration and try again.
-          </p>
-        </div>
-      )}
+      <GuildsListState
+        status={listState}
+        isEmpty={guilds.length === 0}
+        canWrite={canWrite}
+      />
 
-      {listState !== "unsupported" && (
-        guilds.length === 0 ? (
-          <EmptyState
-            title="No guilds yet"
-            description={
-              canWrite
-                ? "Create your first guild to get started."
-                : "Guilds will appear here once they're created."
-            }
-            icon="-"
-          />
-        ) : (
+      {listState === "loaded" && guilds.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {guilds.map((guild) => {
             const isPending = pendingIds.has(guild.id);
@@ -223,7 +236,6 @@ export default function GuildsPage() {
             );
           })}
         </div>
-        )
       )}
     </DashboardLayout>
   );
