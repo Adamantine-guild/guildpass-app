@@ -22,7 +22,7 @@ import type { Pass, Guild, Member } from "../../mock-data";
 import type { ActivityEvent } from "@/lib/activity/types";
 import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import type { DashboardSettings } from "../../settings";
-import { mockPasses, mockGuilds, mockMembers } from "../../mock-data";
+import { mockPasses, mockGuilds, mockMembers, DEFAULT_GUILD_ID } from "../../mock-data";
 import { DEFAULT_SETTINGS } from "../../settings";
 import { filterMembers, filterPasses, paginateItems } from "@/lib/pagination";
 import { computeDiff } from "@/lib/activity/diff";
@@ -120,7 +120,7 @@ export class MockPassRepository implements IPassRepository {
     changes?: ActivityEvent["changes"],
   ): Promise<void> {
     if (!this.activityRepo) return;
-    await this.activityRepo.append({
+    await this.activityRepo.append(entity.guildId, {
       type,
       source: "dashboard",
       severity: "info",
@@ -201,7 +201,9 @@ export class MockGuildRepository implements IGuildRepository {
     changes?: ActivityEvent["changes"],
   ): Promise<void> {
     if (!this.activityRepo) return;
-    await this.activityRepo.append({
+    // A guild is its own tenant boundary, so guild lifecycle events are
+    // scoped to the guild they describe.
+    await this.activityRepo.append(entity.id, {
       type,
       source: "dashboard",
       severity: "info",
@@ -362,7 +364,7 @@ export class MockMemberRepository implements IMemberRepository {
     changes?: ActivityEvent["changes"],
   ): Promise<void> {
     if (!this.activityRepo) return;
-    await this.activityRepo.append({
+    await this.activityRepo.append(entity.guildId, {
       type,
       source: "dashboard",
       severity: "info",
@@ -379,9 +381,15 @@ export class MockMemberRepository implements IMemberRepository {
  */
 export class MockActivityRepository implements IActivityRepository {
   private events: ActivityEvent[] = [];
+  /** eventId -> owning guildId. Kept out of the public ActivityEvent shape. */
+  private eventGuildIds: Map<string, string> = new Map();
   private processedIds: Set<string> = new Set();
 
-  async append(event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>): Promise<ActivityEvent> {
+  async append(
+    guildId: string,
+    event: Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> & Partial<Pick<ActivityEvent, "schemaVersion">>,
+  ): Promise<ActivityEvent> {
+    if (!guildId) throw new Error("append requires a guildId scope");
     const fullEvent: ActivityEvent = {
       ...event,
       id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -389,16 +397,18 @@ export class MockActivityRepository implements IActivityRepository {
       schemaVersion: event.schemaVersion ?? CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
     };
     this.events.unshift(fullEvent);
+    this.eventGuildIds.set(fullEvent.id, guildId);
     this.processedIds.add(fullEvent.id);
     return fullEvent;
   }
 
-  async query(options?: {
+  async query(guildId: string, options?: {
     limit?: number;
     type?: ActivityEvent["type"];
     since?: string;
   }): Promise<ActivityEvent[]> {
-    let filtered = [...this.events];
+    if (!guildId) throw new Error("query requires a guildId scope");
+    let filtered = this.events.filter((e) => this.eventGuildIds.get(e.id) === guildId);
 
     if (options?.type) {
       filtered = filtered.filter((e) => e.type === options.type);
@@ -454,7 +464,10 @@ export class MockSettingsRepository implements ISettingsRepository {
       this.settings as unknown as Record<string, unknown>,
     );
     if (changes.length > 0 && this.activityRepo) {
-      await this.activityRepo.append({
+      // Settings are a single workspace-level document, not yet guild-scoped
+      // (see docs/multi-tenancy.md) — tagged under the default guild until
+      // settings gain per-guild scope.
+      await this.activityRepo.append(DEFAULT_GUILD_ID, {
         type: "guild.updated",
         source: "dashboard",
         severity: "info",

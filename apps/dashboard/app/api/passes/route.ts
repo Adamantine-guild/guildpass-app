@@ -89,8 +89,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const created = await passRepository.create(getActiveGuildId(request), validation.data);
-    await recordDashboardActivity({
+    const guildId = getActiveGuildId(request);
+    const created = await passRepository.create(guildId, validation.data);
+    await recordDashboardActivity(guildId, {
       type: "pass.created",
       entity: { type: "pass", id: created.id, name: created.name },
       actor: { id: session.userId, name: session.name },
@@ -127,9 +128,10 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const updated = await passRepository.update(getActiveGuildId(request), id, validation.data);
+    const guildId = getActiveGuildId(request);
+    const updated = await passRepository.update(guildId, id, validation.data);
     if (!updated) throw new NotFoundError("Pass not found.");
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "pass.updated",
       entity: { type: "pass", id: updated.id, name: updated.name },
       actor: { id: session.userId, name: session.name },
@@ -159,7 +161,7 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     if (!pass) throw new NotFoundError("Pass not found.");
     const success = await passRepository.delete(guildId, id);
     if (!success) throw new NotFoundError("Pass not found.");
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "pass.deleted",
       entity: { type: "pass", id: pass.id, name: pass.name },
       actor: { id: session.userId, name: session.name },

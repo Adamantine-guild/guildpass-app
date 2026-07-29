@@ -212,13 +212,13 @@ test("Repository Factory: MockActivityRepository", async () => {
     description: "Member joined",
   };
 
-  const result1 = await repo.append(event1);
+  const result1 = await repo.append(GUILD, event1);
   assert.strictEqual(result1.type, "member.joined", "Appended event should preserve type");
   assert.ok(result1.id, "Appended event should get an id");
   assert.ok(result1.timestamp, "Appended event should get a timestamp");
 
   // Test query
-  const events = await repo.query({});
+  const events = await repo.query(GUILD, {});
   assert.ok(Array.isArray(events), "Should return array of events");
   assert.ok(events.some((event) => event.id === result1.id), "Should include appended event");
 

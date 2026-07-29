@@ -548,10 +548,13 @@ export function memberRepositoryContract(
 
 export function activityRepositoryContract(
   createRepo: () => IActivityRepository,
+  options: RepositoryContractOptions = {},
 ): void {
+  const guildId = options.guildId ?? DEFAULT_CONTRACT_GUILD;
+
   test("ActivityRepository: append creates an event with id and timestamp", async () => {
     const repo = createRepo();
-    const event = await repo.append({
+    const event = await repo.append(guildId, {
       type: "member.joined",
       source: "dashboard",
       severity: "info",
@@ -569,7 +572,7 @@ export function activityRepositoryContract(
 
   test("ActivityRepository: append with entity and metadata", async () => {
     const repo = createRepo();
-    const event = await repo.append({
+    const event = await repo.append(guildId, {
       type: "pass.created",
       source: "dashboard",
       severity: "info",
@@ -587,9 +590,29 @@ export function activityRepositoryContract(
     assert.strictEqual(event.actor.name, "admin");
   });
 
+  test("ActivityRepository: append rejects an empty guildId", async () => {
+    const repo = createRepo();
+    await assert.rejects(
+      () =>
+        repo.append("", {
+          type: "member.joined",
+          source: "dashboard",
+          severity: "info",
+          actor: { name: "system" },
+          description: "Should be rejected",
+        }),
+      "append with an empty guildId should throw",
+    );
+  });
+
+  test("ActivityRepository: query rejects an empty guildId", async () => {
+    const repo = createRepo();
+    await assert.rejects(() => repo.query(""), "query with an empty guildId should throw");
+  });
+
   test("ActivityRepository: query returns appended events", async () => {
     const repo = createRepo();
-    await repo.append({
+    await repo.append(guildId, {
       type: "member.joined",
       source: "dashboard",
       severity: "info",
@@ -597,7 +620,7 @@ export function activityRepositoryContract(
       description: "Alice joined",
     });
 
-    const events = await repo.query({});
+    const events = await repo.query(guildId, {});
     assert.ok(Array.isArray(events), "query should return an array");
     assert.ok(events.length > 0, "should return at least one event");
     assert.ok(events.some((e) => e.description === "Alice joined"), "should include appended event");
@@ -605,7 +628,7 @@ export function activityRepositoryContract(
 
   test("ActivityRepository: query filters by type", async () => {
     const repo = createRepo();
-    await repo.append({
+    await repo.append(guildId, {
       type: "member.joined",
       source: "dashboard",
       severity: "info",
@@ -613,7 +636,7 @@ export function activityRepositoryContract(
       description: "Alice joined",
     });
 
-    await repo.append({
+    await repo.append(guildId, {
       type: "pass.created",
       source: "dashboard",
       severity: "info",
@@ -621,7 +644,7 @@ export function activityRepositoryContract(
       description: "Pass created",
     });
 
-    const filtered = await repo.query({ type: "pass.created" });
+    const filtered = await repo.query(guildId, { type: "pass.created" });
     assert.ok(filtered.every((e) => e.type === "pass.created"), "all results should match type filter");
     assert.strictEqual(filtered.length, 1, "should only return matching events");
   });
@@ -629,7 +652,7 @@ export function activityRepositoryContract(
   test("ActivityRepository: query respects limit", async () => {
     const repo = createRepo();
     for (let i = 0; i < 5; i++) {
-      await repo.append({
+      await repo.append(guildId, {
         type: "member.joined",
         source: "dashboard",
         severity: "info",
@@ -638,7 +661,7 @@ export function activityRepositoryContract(
       });
     }
 
-    const limited = await repo.query({ limit: 2 });
+    const limited = await repo.query(guildId, { limit: 2 });
     assert.strictEqual(limited.length, 2, "limit should cap results");
   });
 
@@ -646,7 +669,7 @@ export function activityRepositoryContract(
     const repo = createRepo();
 
     // First event
-    await repo.append({
+    await repo.append(guildId, {
       type: "member.joined",
       source: "dashboard",
       severity: "info",
@@ -662,7 +685,7 @@ export function activityRepositoryContract(
     await new Promise((r) => setTimeout(r, 10));
 
     // Later event
-    await repo.append({
+    await repo.append(guildId, {
       type: "member.joined",
       source: "dashboard",
       severity: "info",
@@ -670,7 +693,7 @@ export function activityRepositoryContract(
       description: "Late event",
     });
 
-    const sinceFiltered = await repo.query({ since: cutoff });
+    const sinceFiltered = await repo.query(guildId, { since: cutoff });
     assert.ok(sinceFiltered.length > 0, "should return events after cutoff");
     assert.ok(
       sinceFiltered.every((e) => new Date(e.timestamp).getTime() >= new Date(cutoff).getTime()),
@@ -704,7 +727,7 @@ export function activityRepositoryContract(
 
   test("ActivityRepository: append auto-marks event as processed", async () => {
     const repo = createRepo();
-    const event = await repo.append({
+    const event = await repo.append(guildId, {
       type: "member.joined",
       source: "dashboard",
       severity: "info",
@@ -721,7 +744,7 @@ export function activityRepositoryContract(
     const descriptions: string[] = [];
 
     for (let i = 0; i < 3; i++) {
-      const evt = await repo.append({
+      const evt = await repo.append(guildId, {
         type: "member.joined",
         source: "dashboard",
         severity: "info",
@@ -731,7 +754,7 @@ export function activityRepositoryContract(
       descriptions.push(evt.description);
     }
 
-    const events = await repo.query({});
+    const events = await repo.query(guildId, {});
     // Events are unshifted, so newest is first
     assert.strictEqual(
       events[0].description,
@@ -749,7 +772,7 @@ export function activityRepositoryContract(
     const repo = createRepo();
 
     for (let i = 0; i < 3; i++) {
-      await repo.append({
+      await repo.append(guildId, {
         type: "member.joined",
         source: "dashboard",
         severity: "info",
@@ -758,7 +781,7 @@ export function activityRepositoryContract(
       });
     }
 
-    await repo.append({
+    await repo.append(guildId, {
       type: "pass.created",
       source: "dashboard",
       severity: "info",
@@ -766,16 +789,94 @@ export function activityRepositoryContract(
       description: "Pass event",
     });
 
-    const result = await repo.query({ type: "member.joined", limit: 2 });
+    const result = await repo.query(guildId, { type: "member.joined", limit: 2 });
     assert.strictEqual(result.length, 2, "should return 2 member events");
     assert.ok(result.every((e) => e.type === "member.joined"), "all should be member.joined");
   });
 
   test("ActivityRepository: query returns empty array when no events match", async () => {
     const repo = createRepo();
-    const result = await repo.query({ type: "pass.deleted" });
+    const result = await repo.query(guildId, { type: "pass.deleted" });
     assert.ok(Array.isArray(result), "should return an array");
     assert.strictEqual(result.length, 0, "should be empty when no events match");
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Activity repository isolation contract
+// ────────────────────────────────────────────────────────────────────────────
+
+export function activityRepositoryIsolationContract(
+  createRepo: () => IActivityRepository,
+  options: IsolationContractOptions = {},
+): void {
+  const guildA = options.guildA ?? DEFAULT_CONTRACT_GUILD;
+  const guildB = options.guildB ?? SECONDARY_CONTRACT_GUILD;
+
+  test("ActivityRepository isolation: query never returns another guild's events", async () => {
+    const repo = createRepo();
+    await repo.append(guildA, {
+      type: "member.joined",
+      source: "dashboard",
+      severity: "info",
+      actor: { name: "Ana" },
+      description: "Guild A isolation event",
+    });
+    await repo.append(guildB, {
+      type: "member.joined",
+      source: "dashboard",
+      severity: "info",
+      actor: { name: "Ben" },
+      description: "Guild B isolation event",
+    });
+
+    const eventsA = await repo.query(guildA, {});
+    const eventsB = await repo.query(guildB, {});
+
+    assert.ok(
+      eventsA.some((e) => e.description === "Guild A isolation event"),
+      "guild A should see its own event",
+    );
+    assert.ok(
+      !eventsA.some((e) => e.description === "Guild B isolation event"),
+      "guild A must not see guild B's event",
+    );
+    assert.ok(
+      eventsB.some((e) => e.description === "Guild B isolation event"),
+      "guild B should see its own event",
+    );
+    assert.ok(
+      !eventsB.some((e) => e.description === "Guild A isolation event"),
+      "guild B must not see guild A's event",
+    );
+  });
+
+  test("ActivityRepository isolation: type filter never leaks another guild's events", async () => {
+    const repo = createRepo();
+    await repo.append(guildA, {
+      type: "pass.created",
+      source: "dashboard",
+      severity: "info",
+      actor: { name: "admin" },
+      description: "Guild A pass event",
+    });
+
+    const result = await repo.query(guildB, { type: "pass.created" });
+    assert.strictEqual(result.length, 0, "guild B must not see guild A's pass.created event");
+  });
+
+  test("ActivityRepository isolation: an empty guild's query returns no events even though another guild has some", async () => {
+    const repo = createRepo();
+    await repo.append(guildA, {
+      type: "member.joined",
+      source: "dashboard",
+      severity: "info",
+      actor: { name: "Ana" },
+      description: "Only in guild A",
+    });
+
+    const eventsB = await repo.query(guildB, {});
+    assert.strictEqual(eventsB.length, 0, "guild B should have no events of its own");
   });
 }
 

@@ -72,7 +72,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       passCount: validData.passCount,
     });
 
-    await recordDashboardActivity({
+    await recordDashboardActivity(created.id, {
       type: "guild.created",
       entity: { type: "guild", id: created.id, name: created.name },
       actor: { id: session.userId, name: session.name },
@@ -100,7 +100,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     const guildRepository = getGuildRepository();
     const updated = await guildRepository.update(id, body);
     if (!updated) throw new Error("Guild not found or update failed");
-    await recordDashboardActivity({
+    await recordDashboardActivity(id, {
       type: "guild.updated",
       entity: { type: "guild", id: updated.id, name: updated.name },
       actor: { id: session.userId, name: session.name },
@@ -128,7 +128,7 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     if (!guild) throw new Error("Guild not found or deletion failed");
     const success = await guildRepository.delete(id);
     if (!success) throw new Error("Guild not found or deletion failed");
-    await recordDashboardActivity({
+    await recordDashboardActivity(id, {
       type: "guild.deleted",
       entity: { type: "guild", id: guild.id, name: guild.name },
       actor: { id: session.userId, name: session.name },

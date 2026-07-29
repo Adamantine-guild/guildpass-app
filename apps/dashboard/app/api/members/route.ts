@@ -162,8 +162,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const memberRepository = getMemberRepository();
-    const created = await memberRepository.create(getActiveGuildId(request), validation.data);
-    await recordDashboardActivity({
+    const guildId = getActiveGuildId(request);
+    const created = await memberRepository.create(guildId, validation.data);
+    await recordDashboardActivity(guildId, {
       type: "member.joined",
       entity: { type: "member", id: created.id, name: created.name },
       actor: { id: session.userId, name: session.name },
@@ -207,7 +208,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     if (!updated) throw new NotFoundError("Member not found.");
     const rolesChanged = existing && validation.data.roles && JSON.stringify(existing.roles) !== JSON.stringify(validation.data.roles);
     if (rolesChanged) {
-      await recordDashboardActivity({
+      await recordDashboardActivity(guildId, {
         type: "member.roles_changed",
         entity: { type: "member", id: updated.id, name: updated.name },
         actor: { id: session.userId, name: session.name },
@@ -238,7 +239,7 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     if (!member) throw new NotFoundError("Member not found.");
     const success = await memberRepository.delete(guildId, id);
     if (!success) throw new NotFoundError("Member not found.");
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "member.left",
       entity: { type: "member", id: member.id, name: member.name },
       actor: { id: session.userId, name: session.name },

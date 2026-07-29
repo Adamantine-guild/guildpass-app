@@ -113,14 +113,16 @@ async function assertGuildCounts(
 }
 
 /**
- * Count audit events of a specific type that contain a given substring.
+ * Count audit events of a specific type that contain a given substring,
+ * scoped to the given guild.
  */
 async function countAuditEvents(
+  guildId: string,
   type: string,
   descriptionSubstring: string,
 ): Promise<number> {
   const activityRepo = getActivityRepository();
-  const events = await activityRepo.query({ type: type as any });
+  const events = await activityRepo.query(guildId, { type: type as any });
   return events.filter((e) => e.description.includes(descriptionSubstring)).length;
 }
 
@@ -297,7 +299,7 @@ describe("Reconciliation", () => {
       await assertGuildCounts(guild.id, actualMemberCount, guild.passCount);
 
       // Verify an audit event was recorded
-      const auditCount = await countAuditEvents("guild.updated", "[RECONCILE]");
+      const auditCount = await countAuditEvents(guild.id, "guild.updated", "[RECONCILE]");
       assert.ok(auditCount >= 1, "At least one reconciliation audit event should exist");
     });
 
@@ -328,7 +330,7 @@ describe("Reconciliation", () => {
 
       await assertGuildCounts(guild.id, guild.memberCount, actualPassCount);
 
-      const auditCount = await countAuditEvents("guild.updated", "[RECONCILE]");
+      const auditCount = await countAuditEvents(guild.id, "guild.updated", "[RECONCILE]");
       assert.ok(auditCount >= 1);
     });
 
@@ -379,7 +381,7 @@ describe("Reconciliation", () => {
       });
 
       const activityRepo = getActivityRepository();
-      const events = await activityRepo.query({ type: "guild.updated" });
+      const events = await activityRepo.query(guild.id, { type: "guild.updated" });
       const reconcileEvent = events.find(
         (e) =>
           e.metadata?.reconciliation === true &&
@@ -429,7 +431,7 @@ describe("Reconciliation", () => {
       await assertGuildCounts(guild.id, actualMembers, actualPasses);
 
       // Count audit events after first run
-      const auditAfterFirst = await countAuditEvents("guild.updated", "[RECONCILE]");
+      const auditAfterFirst = await countAuditEvents(guild.id, "guild.updated", "[RECONCILE]");
 
       // Second run: should find no discrepancies (counters now match ground truth)
       const report2 = await reconcileGuildCounts({
@@ -443,7 +445,7 @@ describe("Reconciliation", () => {
       assert.ok(report2.summary.includes("all consistent"));
 
       // Count audit events after second run — should be unchanged
-      const auditAfterSecond = await countAuditEvents("guild.updated", "[RECONCILE]");
+      const auditAfterSecond = await countAuditEvents(guild.id, "guild.updated", "[RECONCILE]");
       assert.equal(
         auditAfterSecond,
         auditAfterFirst,

@@ -47,9 +47,10 @@ function actorFromSession(session?: Session): { id?: string; name?: string; wall
 }
 
 export async function recordDashboardActivity(
+  guildId: string,
   input: DashboardActivityInput
 ): Promise<ActivityEvent> {
-  const event = await getActivityRepository().append({
+  const event = await getActivityRepository().append(guildId, {
     type: input.type,
     source: "dashboard",
     severity: input.severity ?? "info",

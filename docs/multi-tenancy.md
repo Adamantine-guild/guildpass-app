@@ -15,10 +15,12 @@ Concretely:
 
 - Every `Pass` and `Member` record carries an explicit `guildId` foreign key
   identifying the single guild that owns it.
-- Every method on `IPassRepository` and `IMemberRepository` requires an
-  explicit `guildId` scope as its **first parameter**. There is no unscoped
-  variant, and the parameter is not an optional filter — omitting it is a
-  **compile error**, not a runtime possibility.
+- Every method on `IPassRepository`, `IMemberRepository`, and
+  `IActivityRepository` (`append`/`query`) requires an explicit `guildId`
+  scope as its **first parameter**. There is no unscoped variant, and the
+  parameter is not an optional filter — omitting it is a **compile error**,
+  not a runtime possibility. The activity adapters additionally throw at
+  runtime if `guildId` is empty, for callers that bypass the type system.
 - A scoped call that references a record belonging to a different guild
   behaves exactly as if the record does not exist: reads return `null`,
   updates return `null`, deletes return `false`. Existence of another
@@ -36,9 +38,14 @@ Concretely:
   (`(guildId, wallet)`), not global.
 
 Guilds themselves (`IGuildRepository`) are the tenant boundary, so they are
-not scoped further. Activity and settings repositories are workspace-level
-documents today; when they gain per-guild rows they must adopt the same
-pattern.
+not scoped further. Guild lifecycle activity (`guild.created`/`updated`/
+`deleted`) is tagged with the guild's own id, since a guild is its own tenant
+boundary. Settings remain a single workspace-level document (`ISettingsRepository`
+is not guild-scoped); the activity events it emits are tagged under
+`DEFAULT_GUILD_ID` until settings gain per-guild rows and adopt the same
+pattern. `hasProcessed`/`markProcessed` on `IActivityRepository` are webhook
+idempotency bookkeeping keyed by opaque event id, not a data query, so they
+remain workspace-wide.
 
 ## Why Structural
 
@@ -65,11 +72,12 @@ boundary at runtime. Defense in depth:
 
 The behavioural contracts in
 [`apps/dashboard/test/repositories/contracts.ts`](../apps/dashboard/test/repositories/contracts.ts)
-include two dedicated isolation suites that every conforming implementation
+include dedicated isolation suites that every conforming implementation
 (mock included) must register and pass:
 
 - `passRepositoryIsolationContract`
 - `memberRepositoryIsolationContract`
+- `activityRepositoryIsolationContract`
 
 They seed two guilds with distinct records and assert, for every repository
 method, that querying with guild A's scope never returns, modifies, or
@@ -117,6 +125,27 @@ Operators can switch the active guild from the dashboard sidebar or via
 Route handlers must call `getActiveGuildId(request)` — never hard-code a
 guild id. Once per-guild RBAC (issue #67) lands, that helper should also
 verify the authenticated session is allowed to act on the resolved guild.
+
+## Known Gaps
+
+Two paths still fall outside the structural guarantee above and rely on
+best-effort filtering instead. Both are pre-existing and out of scope for the
+repository-layer enforcement described here; they're called out so they
+aren't mistaken for covered:
+
+- **Webhook-sourced activity.** Incoming webhook payloads
+  (`app/api/webhooks/route.ts`) carry no `guildId` field in their schema, so
+  events ingested via `activityStorage` (a persistence path separate from
+  `IActivityRepository`) aren't guild-tagged at write time. `GET
+  /api/activity` still filters these via the `metadata.guildId` convention
+  (`lib/data/guild-scoped.ts`), which only recognizes events that happen to
+  carry it — closing this fully requires adding `guildId` to the webhook
+  contract.
+- **The live activity SSE stream** (`app/api/activity/stream/route.ts`)
+  broadcasts every published event to every connected client; tenant
+  separation on that path is enforced client-side only
+  (`useActivityFeed.ts`), not server-side, because `EventSource` cannot send
+  the `X-Guild-Id` header the rest of the app uses for scoping.
 
 ## Related Documents
 

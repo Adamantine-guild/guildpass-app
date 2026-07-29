@@ -22,13 +22,13 @@ describe("permission-denied audit recording", () => {
   beforeEach(() => clearRepositories());
 
   test("guardPermission returns ok:true and records no audit event when the session holds the permission", async () => {
-    const before = await getActivityRepository().query({ type: "activity.permission_denied" });
+    const before = await getActivityRepository().query(DEFAULT_GUILD_ID, { type: "activity.permission_denied" });
 
     const result = guardPermission(SESSION_ADMIN, DEFAULT_GUILD_ID, "passes:write");
     assert.equal(result.ok, true);
 
     await flush();
-    const after = await getActivityRepository().query({ type: "activity.permission_denied" });
+    const after = await getActivityRepository().query(DEFAULT_GUILD_ID, { type: "activity.permission_denied" });
     assert.equal(after.length, before.length, "no denial event should be recorded on success");
   });
 
@@ -46,7 +46,7 @@ describe("permission-denied audit recording", () => {
 
     await flush();
 
-    const events = await getActivityRepository().query({ type: "activity.permission_denied" });
+    const events = await getActivityRepository().query(DEFAULT_GUILD_ID, { type: "activity.permission_denied" });
     const found = events.find(
       (e) => e.actor.id === SESSION_READONLY.userId && e.metadata?.permission === "passes:write"
     );
