@@ -279,7 +279,7 @@ export class IndexerCore {
     }
   }
 
-  private async applyEventApplication(decoded: any, tx: any) {
+  private async applyEventApplication(decoded: any, tx: any): Promise<any> {
     const { eventName, args } = decoded;
 
     if (eventName === MEMBERSHIP_EVENTS.MembershipCreated) {

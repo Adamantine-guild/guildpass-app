@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Events } from "discord.js";
-import { config, validateConfig } from "./config.js";
+import { config } from "./config.js";
 import { RoleReconciliationQueue } from "./queue.js";
 import { reconcileMemberRoles, resolveDesiredRoles, type RoleMap } from "./roles.js";
 import { handleGuildStats } from "./commands/guild-stats.js";

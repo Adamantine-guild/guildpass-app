@@ -36,8 +36,11 @@ GuildPass is a web dashboard for managing access, passes, guilds/communities, me
 
 ## Prerequisites
 
-- **Node.js** 18.17 or later
-- **pnpm** (install via `npm install -g pnpm`)
+- **Node.js** 18.17 or later (recommended: 20.x)
+- **pnpm** 9 or later (recommended: 10.x)
+
+See [VERSIONS.md](./VERSIONS.md) for the full, up-to-date dependency matrix
+(Node.js, pnpm, TypeScript, and each app's framework versions).
 
 ---
 

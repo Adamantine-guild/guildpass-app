@@ -4,6 +4,7 @@ const nextConfig = {
   transpilePackages: [
     "@guildpass/env",
     "@guildpass/integration-client",
+    "@guildpass/metrics",
     "@guildpass/webhook-utils",
   ],
 

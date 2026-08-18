@@ -45,7 +45,23 @@ export default tseslint.config(
         module: "readonly",
         process: "readonly",
         __dirname: "readonly",
-        console: "readonly"
+        console: "readonly",
+        // Web/fetch API globals available in Node 18+ (used by tests and scripts)
+        fetch: "readonly",
+        Response: "readonly",
+        Request: "readonly",
+        Headers: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        AbortController: "readonly",
+        AbortSignal: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
+        structuredClone: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly"
       }
     }
   }

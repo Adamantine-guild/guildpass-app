@@ -17,6 +17,7 @@ model ProcessedEvent {
   status          String   @default("processed") // e.g., processed, reverted
   eventType       String
   data            Json
+  previousState   Json?    // membership state before this event was applied
   fencingToken    Int      @default(0) // Monotonically increasing leader generation
   createdAt       DateTime @default(now())
 
@@ -52,6 +53,23 @@ model BackfillLock {
   acquiredAt  DateTime
   liveHead    BigInt?                  // current chain head (live-indexer only)
   updatedAt   DateTime  @updatedAt
+}
+
+/// Dead-letter queue for events that could not be processed (for retry / triage).
+model FailedEvent {
+  id              String   @id @default(uuid())
+  contractAddress String
+  blockHash       String
+  blockNumber     BigInt
+  transactionHash String
+  logIndex        Int
+  eventType       String
+  error           String
+  data            Json
+  retryCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress])
 }
 
 /// Singleton row (id = "singleton") used for distributed leader election

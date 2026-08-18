@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm 10 is required for the workspace config (`allowBuilds`,
+      # `minimumReleaseAgeExclude`). See VERSIONS.md for the supported range.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The access-api types reference the generated Prisma client.
+      - name: Generate Prisma client
+        run: pnpm --filter @guildpass/access-api prisma:generate
+
+      # Shared packages must be compiled before typechecking/building the apps
+      # that consume them (@guildpass/env has no `prepare` script, and the
+      # apps resolve `@guildpass/*` packages from their `dist` output).
+      - name: Build workspace packages
+        run: pnpm -r --filter "./packages/*" build
+
+      - name: Type check
+        run: pnpm typecheck
+
+      # Build each app with its own build system (Next.js, Docusaurus, tsc).
+      - name: Build apps
+        run: pnpm -r --filter "./apps/*" build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

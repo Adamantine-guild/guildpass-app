@@ -63,8 +63,11 @@ By participating you agree to our [Code of Conduct](./CODE_OF_CONDUCT.md). Pleas
 
 ### Prerequisites
 
-- **Node.js** 18.17 or higher
-- **pnpm** 9+ (install via `npm install -g pnpm`)
+- **Node.js** 18.17 or higher (recommended: 20.x)
+- **pnpm** 9+ (install via `npm install -g pnpm`; recommended: 10.x)
+
+> See [`VERSIONS.md`](./VERSIONS.md) for the authoritative Node.js, pnpm,
+> TypeScript, and framework version matrix.
 - A **Discord application** (bot token + `applications.commands` scope) — only needed if working on the Discord bot
 
 ### Quick Start (Dashboard)

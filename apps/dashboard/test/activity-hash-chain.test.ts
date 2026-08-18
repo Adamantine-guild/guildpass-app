@@ -74,7 +74,7 @@ describe("activity hash-chain canonical format", () => {
 
   test("mock repository events remain unhashed application events", async () => {
     const repository = new DurableActivityRepository("mock://activity-chain");
-    const event = await repository.append({
+    const event = await repository.append("test-guild", {
       type: "member.joined",
       source: "dashboard",
       severity: "info",

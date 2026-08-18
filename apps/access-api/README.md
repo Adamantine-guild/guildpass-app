@@ -9,9 +9,10 @@ The Access API contains the on-chain event indexer for GuildPass membership stat
 1. [Architecture Overview](#architecture-overview)
 2. [Environment Setup](#environment-setup)
 3. [Running the Indexer](#running-the-indexer)
-4. [Database Schema](#database-schema)
-5. [Backfill / Replay Runbook](#backfill--replay-runbook)
-6. [Development & Testing](#development--testing)
+4. [TypeScript, ESM & Node.js](#typescript-esm--nodejs)
+5. [Database Schema](#database-schema)
+6. [Backfill / Replay Runbook](#backfill--replay-runbook)
+7. [Development & Testing](#development--testing)
 
 ---
 
@@ -77,6 +78,19 @@ pnpm build && pnpm start
 ```
 
 The indexer polls every 10 seconds.  Logs are written to stdout.
+
+---
+
+## TypeScript, ESM & Node.js
+
+The Access API is a plain **Node.js `http` server** (no web framework such as Fastify/Express) compiled to **ECMAScript modules** targeting **Node.js 18+**.
+
+- **Module system:** `"type": "module"` in `package.json`, combined with `module`/`moduleResolution: "NodeNext"` (inherited from the workspace root [`tsconfig.base.json`](../../tsconfig.base.json)). Relative imports therefore use explicit `.js` extensions, as required by NodeNext ESM.
+- **Compile target:** `ES2022` — the language level fully supported by Node.js 18+.
+- **Build output:** `tsc` compiles `src/**/*.ts` → `dist/**/*.js`, with `src/index.ts` emitting `dist/index.js` (the entry point used by both `pnpm start` and the production Docker image).
+- **Dev / scripts / tests:** Run directly from TypeScript via `tsx` (`pnpm dev`, `pnpm backfill`, `pnpm test`) — no build step is required for local development.
+
+Required runtimes are documented in [`VERSIONS.md`](../../VERSIONS.md).
 
 ---
 
