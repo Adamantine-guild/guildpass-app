@@ -71,7 +71,7 @@ async function main() {
 
     console.log(
       `[LeaderElection] Started. Instance: ${leaderElection.getInstanceId()}, ` +
-        `Role: ${leaderElection.getStatus().role}`,
+        `Role: ${leaderElection.getStatus().role}.`,
     );
   }
 
