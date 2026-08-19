@@ -122,17 +122,17 @@ export class HttpClient {
         }
 
         // TimeoutError and network errors are retryable.
-        if (error instanceof TimeoutError || error instanceof NetworkError) {
+        if (lastError instanceof TimeoutError || lastError instanceof NetworkError) {
           // Continue to retry below.
         } else if (
-          error instanceof UpstreamError &&
-          this.isTransient(error.status)
+          lastError instanceof UpstreamError &&
+          this.isTransient(lastError.status)
         ) {
           // Transient 5xx/429 is retryable — continue.
         } else {
           // Non-retryable upstream error — fail immediately.
           this.breaker?.recordFailure();
-          throw error;
+          throw lastError;
         }
       } finally {
         if (timeoutId) clearTimeout(timeoutId);

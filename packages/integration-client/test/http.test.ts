@@ -23,7 +23,7 @@ test("HttpClient - timeout support", async () => {
   // Should fail if timeout is shorter than delay
   await assert.rejects(
     client.request("http://localhost", { timeout: 50 }),
-    (err: any) => err.message.includes("Timeout")
+    (err: any) => err.name === "TimeoutError" || err.message.toLowerCase().includes("timed out")
   );
 });
 
@@ -97,8 +97,10 @@ test("HttpClient - explicit maxAttempts: 1 correctly overrides default", async (
   // Provide explicit override
   const client = new HttpClient({ fetch: mockFetch as any, retry: { maxAttempts: 1 } });
 
-  const res = await client.request("http://localhost");
-  assert.strictEqual(res.status, 502);
+  await assert.rejects(
+    client.request("http://localhost"),
+    (err: any) => err.name === "UpstreamError" && err.status === 502
+  );
   assert.strictEqual(attempts, 1);
 });
 
