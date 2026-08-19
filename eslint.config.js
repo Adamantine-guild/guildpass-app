@@ -51,7 +51,10 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": "error",
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
-      "@typescript-eslint/no-non-null-assertion": "warn"
+      "@typescript-eslint/no-non-null-assertion": "warn",
+      // Repo targets ES2020, where Error#cause does not exist yet — the rule
+      // would force throwing `{ cause }` and break the typecheck.
+      "preserve-caught-error": "off"
     }
   },
   {
@@ -76,6 +79,12 @@ export default tseslint.config(
         Buffer: "readonly",
         URL: "readonly",
         fetch: "readonly",
+        Request: "readonly",
+        Response: "readonly",
+        Headers: "readonly",
+        FormData: "readonly",
+        AbortController: "readonly",
+        AbortSignal: "readonly",
         setTimeout: "readonly",
         setInterval: "readonly",
         clearTimeout: "readonly",

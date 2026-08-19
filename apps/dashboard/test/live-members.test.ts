@@ -5,7 +5,11 @@ import http from "node:http";
 test("GET /api/members performs live wallet lookup via core API", async () => {
   const previousMode = process.env.DASHBOARD_API_MODE;
   const previousCoreUrl = process.env.GUILD_PASS_CORE_URL;
+  const previousApiKey = process.env.GUILD_PASS_CORE_API_KEY;
+  const previousWebhookSecret = process.env.WEBHOOK_SECRET;
   process.env.DASHBOARD_API_MODE = "live";
+  process.env.GUILD_PASS_CORE_API_KEY = "test-core-api-key";
+  process.env.WEBHOOK_SECRET = "test-webhook-secret";
 
   // Note: this test requires a mock HTTP server; see live-members-mockclient for injected version
   // Start a tiny HTTP server that mimics the core API
@@ -78,6 +82,18 @@ test("GET /api/members performs live wallet lookup via core API", async () => {
       delete process.env.GUILD_PASS_CORE_URL;
     } else {
       process.env.GUILD_PASS_CORE_URL = previousCoreUrl;
+    }
+
+    if (previousApiKey === undefined) {
+      delete process.env.GUILD_PASS_CORE_API_KEY;
+    } else {
+      process.env.GUILD_PASS_CORE_API_KEY = previousApiKey;
+    }
+
+    if (previousWebhookSecret === undefined) {
+      delete process.env.WEBHOOK_SECRET;
+    } else {
+      process.env.WEBHOOK_SECRET = previousWebhookSecret;
     }
   }
 });

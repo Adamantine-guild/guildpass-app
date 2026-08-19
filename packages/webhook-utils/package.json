@@ -1,9 +1,9 @@
 {
   "name": "@guildpass/webhook-utils",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
-  "description": "Lightweight webhook verification utilities for GuildPass integrations",
+  "description": "Lightweight webhook verification and outbound delivery utilities for GuildPass integrations",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

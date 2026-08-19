@@ -4,176 +4,139 @@ import {
   decodeEventLog,
   type Address,
   type PublicClient,
-  type Log
+  type Log,
 } from "viem";
 import { mainnet } from "viem/chains";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { MEMBERSHIP_ABI, MEMBERSHIP_EVENTS } from "@guildpass/contracts";
-
-const prisma = new PrismaClient();
+import type { LeaderElectionService } from "../utils/leader-election.js";
 
 export interface IndexerConfig {
   rpcUrl: string;
-  contractAddress: Address;
+  contractAddresses?: Address[];
+  contractAddress?: Address; // Added to support single-address test configurations
   confirmationDepth: number;
   startBlock: bigint;
 }
 
-export class MembershipIndexer {
-  private client: PublicClient;
-  private config: IndexerConfig;
+// ─── Types shared between the live indexer and the backfill CLI ───────────────
 
-  constructor(config: IndexerConfig) {
+/** Lightweight summary of one applied event, used by dry-run mode. */
+export interface ProcessedLogSummary {
+  transactionHash: string;
+  logIndex: number;
+  blockNumber: bigint;
+  blockHash: string;
+  eventType: string;
+  args: Record<string, unknown>;
+  /** Whether the record already exists (idempotent re-application). */
+  alreadyProcessed: boolean;
+}
+
+/** Options passed to the shared processRange() method. */
+export interface ProcessRangeOptions {
+  contractAddress?: Address; // Changed from required to optional
+  fromBlock: bigint;
+  toBlock: bigint;
+  dryRun?: boolean;
+}
+
+/** Result returned by processRange(). */
+export interface ProcessRangeResult {
+  fromBlock: bigint;
+  toBlock: bigint;
+  logsFound: number;
+  logsApplied: number;
+  logsSkipped: number;
+  dryRun: boolean;
+  /** Populated only in dry-run mode – one entry per log that would be applied. */
+  preview: ProcessedLogSummary[];
+}
+
+// ─── Core: reusable processing engine ─────────────────────────────────────────
+
+/**
+ * IndexerCore owns the stateless event-processing logic so it can be called
+ * by both the continuous live indexer (poll loop) and the one-shot backfill CLI.
+ */
+export class IndexerCore {
+  private client: PublicClient;
+  protected config: IndexerConfig;
+  protected db: PrismaClient;
+  protected leaderElection: LeaderElectionService | null = null;
+
+  constructor(config: IndexerConfig, db?: PrismaClient) {
     this.config = config;
+    this.db = db ?? new PrismaClient();
     this.client = createPublicClient({
       chain: mainnet,
       transport: http(config.rpcUrl),
     });
   }
 
-  async start() {
-    console.log("Starting indexer...");
-    while (true) {
-      try {
-        await this.poll();
-      } catch (error) {
-        console.error("Indexer error:", error);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-    }
+  attachLeaderElection(leaderElection: LeaderElectionService): void {
+    this.leaderElection = leaderElection;
   }
 
-  async poll() {
-    const lastCheckpoint = await prisma.indexerCheckpoint.findUnique({
-      where: { id: "singleton" },
-    });
+  getClient(): PublicClient {
+    return this.client;
+  }
 
-    const currentBlock = await this.client.getBlockNumber();
+  /**
+   * Fetch and process (or preview) all logs for one contract in [fromBlock, toBlock].
+   */
+  async processRange(opts: ProcessRangeOptions): Promise<ProcessRangeResult> {
+    const { 
+      contractAddress = this.config.contractAddress || this.config.contractAddresses?.[0], 
+      fromBlock, 
+      toBlock, 
+      dryRun = false 
+    } = opts;
 
-    // We only process up to (tip - confirmationDepth) to ensure finality
-    const safeTip = currentBlock - BigInt(this.config.confirmationDepth);
-
-    let fromBlock = lastCheckpoint ? lastCheckpoint.lastBlock + 1n : this.config.startBlock;
-
-    // Detect and handle reorgs before moving forward
-    await this.checkReorg(fromBlock);
-
-    // Refresh fromBlock in case checkReorg triggered a rollback
-    const updatedCheckpoint = await prisma.indexerCheckpoint.findUnique({
-      where: { id: "singleton" },
-    });
-    fromBlock = updatedCheckpoint ? updatedCheckpoint.lastBlock + 1n : this.config.startBlock;
-
-    if (fromBlock > safeTip) {
-      return;
+    if (!contractAddress) {
+      throw new Error("No contract address provided for processRange");
     }
 
-    const toBlock = safeTip;
-    console.log(`Indexing from ${fromBlock} to ${toBlock}`);
-
-    await this.processLogs(fromBlock, toBlock);
-
-    await prisma.indexerCheckpoint.upsert({
-      where: { id: "singleton" },
-      update: { lastBlock: toBlock },
-      create: { id: "singleton", lastBlock: toBlock },
-    });
-  }
-
-  private async checkReorg(fromBlock: bigint) {
-    // Check blocks in the confirmation window
-    const depth = BigInt(this.config.confirmationDepth);
-    const checkFrom = fromBlock > depth ? fromBlock - depth : 0n;
-
-    const processedBlocks = await prisma.processedEvent.findMany({
-      where: {
-        blockNumber: { gte: checkFrom },
-        status: "processed",
-      },
-      select: { blockNumber: true, blockHash: true },
-      distinct: ["blockNumber"],
-      orderBy: { blockNumber: "desc" },
-    });
-
-    for (const pb of processedBlocks) {
-      const actualBlock = await this.client.getBlock({ blockNumber: pb.blockNumber });
-
-      if (actualBlock.hash !== pb.blockHash) {
-        console.warn(`Reorg detected at block ${pb.blockNumber}! Expected ${pb.blockHash}, got ${actualBlock.hash}`);
-        await this.handleReorg(pb.blockNumber);
-        return;
-      }
-    }
-  }
-
-  private async handleReorg(reorgBlockNumber: bigint) {
-    const safeBlock = reorgBlockNumber - 1n;
-    console.log(`Rolling back to safe block ${safeBlock}`);
-
-    // Fetch all events that are being reverted to undo their application state
-    const eventsToRevert = await prisma.processedEvent.findMany({
-      where: {
-        blockNumber: { gte: reorgBlockNumber },
-        status: "processed"
-      },
-      orderBy: { blockNumber: "desc" }
-    });
-
-    await prisma.$transaction(async (tx) => {
-      // Revert application state for each event
-      for (const event of eventsToRevert) {
-        await this.revertEventApplication(event, tx);
-      }
-
-      // Mark events as reverted
-      await tx.processedEvent.updateMany({
-        where: { blockNumber: { gte: reorgBlockNumber } },
-        data: { status: "reverted" },
-      });
-
-      // Reset checkpoint
-      await tx.indexerCheckpoint.upsert({
-        where: { id: "singleton" },
-        update: { lastBlock: safeBlock },
-        create: { id: "singleton", lastBlock: safeBlock },
-      });
-    });
-  }
-
-  private async processLogs(fromBlock: bigint, toBlock: bigint) {
-    const logs = await this.client.getLogs({
-      address: this.config.contractAddress,
+    const logs = await this.getClient().getLogs({
+      address: contractAddress,
       fromBlock,
       toBlock,
     });
 
+    const result: ProcessRangeResult = {
+      fromBlock,
+      toBlock,
+      logsFound: logs.length,
+      logsApplied: 0,
+      logsSkipped: 0,
+      dryRun,
+      preview: [],
+    };
+
     for (const log of logs) {
-      await this.processLog(log);
+      if (dryRun) {
+        const summary = await this.previewLog(contractAddress, log);
+        if (summary) {
+          result.preview.push(summary);
+          if (!summary.alreadyProcessed) result.logsApplied++;
+          else result.logsSkipped++;
+        }
+      } else {
+        const applied = await this.processLog(contractAddress, log);
+        if (applied) result.logsApplied++;
+        else result.logsSkipped++;
+      }
     }
+
+    return result;
   }
 
-  private async processLog(log: Log) {
+  private async previewLog(
+    contractAddress: Address,
+    log: Log,
+  ): Promise<ProcessedLogSummary | null> {
     const { transactionHash, logIndex, blockHash, blockNumber } = log;
-    if (!transactionHash || logIndex === null || !blockHash || blockNumber === null) return;
-
-    const existing = await prisma.processedEvent.findUnique({
-      where: { transactionHash_logIndex: { transactionHash, logIndex } },
-    });
-
-    if (existing) {
-      if (existing.status === "processed" && existing.blockHash === blockHash) {
-        console.log(`Skipping duplicate log: ${transactionHash}-${logIndex}`);
-        return;
-      }
-
-      if (existing.blockHash !== blockHash) {
-        console.warn(`Reorg detected via log mismatch at ${transactionHash}`);
-        await this.handleReorg(blockNumber);
-        throw new Error("REORG_DETECTED"); // Abort current batch
-      }
-
-      // If status was "reverted", we proceed to re-process it below
-    }
+    if (!transactionHash || logIndex === null || !blockHash || blockNumber === null) return null;
 
     try {
       const decoded = decodeEventLog({
@@ -182,19 +145,92 @@ export class MembershipIndexer {
         topics: log.topics,
       });
 
-      await prisma.$transaction(async (tx) => {
-        await this.applyEventApplication(decoded, log, tx);
+      const existing = await this.db.processedEvent.findUnique({
+        where: {
+          contractAddress_transactionHash_logIndex: {
+            contractAddress,
+            transactionHash,
+            logIndex,
+          },
+        },
+      });
+      const alreadyProcessed =
+        existing?.status === "processed" && existing.blockHash === blockHash;
+
+      return {
+        transactionHash,
+        logIndex,
+        blockNumber,
+        blockHash,
+        eventType: decoded.eventName,
+        args: decoded.args as Record<string, unknown>,
+        alreadyProcessed,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public async processLog(contractAddress: Address, log: Log): Promise<boolean> {
+    const { transactionHash, logIndex, blockHash, blockNumber } = log;
+    if (!transactionHash || logIndex === null || !blockHash || blockNumber === null) return false;
+
+    const existing = await this.db.processedEvent.findUnique({
+      where: {
+        contractAddress_transactionHash_logIndex: {
+          contractAddress,
+          transactionHash,
+          logIndex,
+        },
+      },
+    });
+
+    if (existing) {
+      if (existing.status === "processed" && existing.blockHash === blockHash) {
+        console.log(`Skipping duplicate log: ${transactionHash}-${logIndex}`);
+        return false;
+      }
+
+      if (existing.blockHash !== blockHash) {
+        console.warn(`Reorg detected via log mismatch at ${transactionHash}`);
+        await this.handleReorg(contractAddress, blockNumber);
+        throw new Error("REORG_DETECTED");
+      }
+    }
+
+    let decoded: any = null;
+
+    try {
+      decoded = decodeEventLog({
+        abi: MEMBERSHIP_ABI,
+        data: log.data,
+        topics: log.topics,
+      });
+
+      await this.db.$transaction(async (tx: Prisma.TransactionClient) => {
+        const previousState = await this.applyEventApplication(decoded, tx);
+        const fencingToken = this.leaderElection ? this.leaderElection.getGeneration() : 0;
 
         await tx.processedEvent.upsert({
-          where: { transactionHash_logIndex: { transactionHash, logIndex } },
+          where: {
+            contractAddress_transactionHash_logIndex: {
+              contractAddress,
+              transactionHash,
+              logIndex,
+            },
+          },
           update: {
+            contractAddress,
             blockHash,
             blockNumber,
             status: "processed",
             eventType: decoded.eventName,
             data: decoded.args as any,
+            previousState,
+            fencingToken,
           },
           create: {
+            contractAddress,
             blockHash,
             blockNumber,
             transactionHash,
@@ -202,22 +238,54 @@ export class MembershipIndexer {
             status: "processed",
             eventType: decoded.eventName,
             data: decoded.args as any,
+            previousState,
+            fencingToken,
           },
         });
       });
+
+      return true;
     } catch (err) {
+      if ((err as Error).message === "REORG_DETECTED") throw err;
+      
       console.error(`Failed to process log ${transactionHash}-${logIndex}:`, err);
+
+      const errorMessage = (err as Error).message || String(err);
+
+      // Persist durable dead-letter status in the FailedEvent queue table
+      try {
+        await this.db.failedEvent.create({
+          data: {
+            contractAddress,
+            blockHash,
+            blockNumber,
+            transactionHash,
+            logIndex,
+            eventType: decoded?.eventName || "Unknown",
+            error: errorMessage,
+            data: {
+              ...(decoded ? decoded.args : { rawData: log.data, rawTopics: log.topics }),
+            } as any,
+          },
+        });
+      } catch (dbWriteErr) {
+        console.error("Critical: Failed to save the dead letter log to the database:", dbWriteErr);
+      }
+
+      // CHECKPOINT ADVANCEMENT APPROACH (Option A):
+      // Stalling advancement avoids moving checkpoints past blocks containing failed logs. 
+      // Throwing immediately aborts processRange and poll(), preventing checkpoint updates.
+      throw new Error(`INDEXER_STALL: Failing block ${blockNumber} due to log processing error: ${errorMessage}`);
     }
   }
 
-  private async applyEventApplication(decoded: any, log: Log, tx: any) {
+  private async applyEventApplication(decoded: any, tx: any) {
     const { eventName, args } = decoded;
-    console.log(`Applying ${eventName} for ${args.member}`);
 
     if (eventName === MEMBERSHIP_EVENTS.MembershipCreated) {
       await tx.membership.upsert({
         where: { wallet_passId: { wallet: args.member, passId: args.passId } },
-        update: { status: 1 }, // Active
+        update: { status: 1 },
         create: { wallet: args.member, passId: args.passId, status: 1 },
       });
     } else if (eventName === MEMBERSHIP_EVENTS.MembershipUpdated) {
@@ -229,23 +297,215 @@ export class MembershipIndexer {
   }
 
   private async revertEventApplication(event: any, tx: any) {
-    console.log(`Reverting ${event.eventType} for ${event.transactionHash}`);
     const data = event.data as any;
 
     if (event.eventType === MEMBERSHIP_EVENTS.MembershipCreated) {
-      // To revert creation, we might delete it or set to unknown
-      // For simplicity, let's delete if we are sure it was created here
-      await tx.membership.delete({
-        where: { wallet_passId: { wallet: data.member, passId: BigInt(data.passId) } }
-      }).catch(() => {}); // Ignore if already gone
+      await tx.membership
+        .delete({
+          where: { wallet_passId: { wallet: data.member, passId: BigInt(data.passId) } },
+        })
+        .catch(() => {});
     } else if (event.eventType === MEMBERSHIP_EVENTS.MembershipUpdated) {
-      // Reverting an update is harder without history.
-      // In a real system, you'd store the PREVIOUS state in ProcessedEvent.
-      // For this task, we'll mark it as status 0 (inactive/unknown) on revert.
-      await tx.membership.update({
-        where: { wallet_passId: { wallet: data.member, passId: BigInt(data.passId) } },
-        data: { status: 0 },
-      }).catch(() => {});
+      await tx.membership
+        .update({
+          where: { wallet_passId: { wallet: data.member, passId: BigInt(data.passId) } },
+          data: { status: 0 },
+        })
+        .catch(() => {});
+    }
+  }
+
+  /** Revert all processed logs for one contract at/after reorgBlockNumber. */
+  async handleReorg(contractAddress: Address, reorgBlockNumber: bigint) {
+    const safeBlock = reorgBlockNumber - 1n;
+    console.log(`[${contractAddress}] Rolling back to safe block ${safeBlock}`);
+
+    const eventsToRevert = await this.db.processedEvent.findMany({
+      where: {
+        contractAddress,
+        blockNumber: { gte: reorgBlockNumber },
+        status: "processed",
+      },
+      orderBy: { blockNumber: "desc" },
+    });
+
+    await this.db.$transaction(async (tx: any) => {
+      for (const event of eventsToRevert) {
+        await this.revertEventApplication(event, tx);
+      }
+
+      await tx.processedEvent.updateMany({
+        where: {
+          contractAddress,
+          blockNumber: { gte: reorgBlockNumber },
+        },
+        data: { status: "reverted" },
+      });
+
+      await tx.indexerCheckpoint.upsert({
+        where: { contractAddress },
+        update: { lastBlock: safeBlock },
+        create: { contractAddress, lastBlock: safeBlock },
+      });
+    });
+  }
+
+  /**
+   * Actionable retry mechanism invocation manually triggered via a CLI worker context.
+   * Reprocesses a specific event record from the dead letter table.
+   */
+  async retryFailedEvent(failedEventId: string): Promise<boolean> {
+    const failed = await this.db.failedEvent.findUnique({
+      where: { id: failedEventId },
+    });
+
+    if (!failed) throw new Error("Failed event record not found");
+
+    const rawLog = {
+      address: failed.contractAddress as Address,
+      blockHash: failed.blockHash as `0x${string}`,
+      blockNumber: failed.blockNumber,
+      transactionHash: failed.transactionHash as `0x${string}`,
+      logIndex: failed.logIndex,
+      data: (failed.data as any).rawData || "0x",
+      topics: (failed.data as any).rawTopics || [],
+      removed: false,
+      transactionIndex: 0,
+    } as unknown as Log;
+
+    try {
+      const successful = await this.processLog(failed.contractAddress as Address, rawLog);
+      if (successful) {
+        await this.db.failedEvent.delete({ where: { id: failedEventId } });
+        return true;
+      }
+      return false;
+    } catch (err) {
+      await this.db.failedEvent.update({
+        where: { id: failedEventId },
+        data: {
+          retryCount: { increment: 1 },
+          error: (err as Error).message || String(err),
+        },
+      });
+      return false;
+    }
+  }
+
+  /** Expose accumulation data metrics for the health/status verification endpoint. */
+  async getDeadLetterMetrics() {
+    const count = await this.db.failedEvent.count();
+    const oldest = await this.db.failedEvent.findFirst({
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    });
+
+    return {
+      deadLetterCount: count,
+      oldestUnresolvedAgeMs: oldest ? Date.now() - oldest.createdAt.getTime() : 0,
+    };
+  }
+}
+
+// ─── Live indexer: owns the poll loop and checkpoint ──────────────────────────
+
+export class MembershipIndexer extends IndexerCore {
+  private running = false;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  attachLeaderElection(leaderElection: LeaderElectionService): void {
+    super.attachLeaderElection(leaderElection);
+  }
+
+  async start() {
+    console.log("Starting indexer...");
+    this.running = true;
+
+    while (this.running) {
+      try {
+        await this.poll();
+      } catch (error) {
+        console.error("Indexer processing cycle suspended:", error);
+      }
+      if (this.running) {
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+      }
+    }
+  }
+
+  stop(): void {
+    this.running = false;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  async poll() {
+    if (this.leaderElection) {
+      await this.leaderElection.verifyLeadershipOrThrow();
+    }
+
+    const currentBlock = await this.getClient().getBlockNumber();
+    const safeTip = currentBlock - BigInt(this.config.confirmationDepth);
+
+    for (const contractAddress of this.config.contractAddresses || []) {
+      const lastCheckpoint = await this.db.indexerCheckpoint.findUnique({
+        where: { contractAddress },
+      });
+
+      let fromBlock = lastCheckpoint ? lastCheckpoint.lastBlock + 1n : this.config.startBlock;
+
+      await this.checkReorg(contractAddress, fromBlock);
+
+      const updatedCheckpoint = await this.db.indexerCheckpoint.findUnique({
+        where: { contractAddress },
+      });
+      fromBlock = updatedCheckpoint ? updatedCheckpoint.lastBlock + 1n : this.config.startBlock;
+
+      if (fromBlock > safeTip) continue;
+
+      const toBlock = safeTip;
+      console.log(
+        `[${contractAddress}] Indexing from ${fromBlock} to ${toBlock}`,
+      );
+      
+      // If processRange hits a failed event block, it throws immediately, blocking this upsert.
+      await this.processRange({ contractAddress, fromBlock, toBlock, dryRun: false });
+
+      const fencingToken = this.leaderElection ? this.leaderElection.getGeneration() : 0;
+      await this.db.indexerCheckpoint.upsert({
+        where: { contractAddress },
+        update: { lastBlock: toBlock, fencingToken },
+        create: { contractAddress, lastBlock: toBlock, fencingToken },
+      });
+    }
+  }
+
+  private async checkReorg(contractAddress: Address, fromBlock: bigint) {
+    const depth = BigInt(this.config.confirmationDepth);
+    const checkFrom = fromBlock > depth ? fromBlock - depth : 0n;
+
+    const processedBlocks = await this.db.processedEvent.findMany({
+      where: {
+        contractAddress,
+        blockNumber: { gte: checkFrom },
+        status: "processed",
+      },
+      select: { blockNumber: true, blockHash: true },
+      distinct: ["blockNumber"],
+      orderBy: { blockNumber: "desc" },
+    });
+
+    for (const pb of processedBlocks) {
+      const actualBlock = await this.getClient().getBlock({ blockNumber: pb.blockNumber });
+      if (actualBlock.hash !== pb.blockHash) {
+        console.warn(
+          `[${contractAddress}] Reorg detected at block ${pb.blockNumber}! Expected ${pb.blockHash}, got ${actualBlock.hash}`,
+        );
+        await this.handleReorg(contractAddress, pb.blockNumber);
+        return;
+      }
     }
   }
 }

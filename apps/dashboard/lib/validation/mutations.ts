@@ -1,5 +1,6 @@
-import type { Member, Pass } from "@/lib/mock-data";
+import { z } from "zod";
 import { MEMBER_ROLES } from "@/lib/member-roles";
+import { isValidChecksumAddress, normaliseAddress } from "../address";
 
 export type FieldValidationError = {
   field: string;
@@ -10,25 +11,20 @@ type ValidationResult<T> =
   | { valid: true; data: T }
   | { valid: false; errors: FieldValidationError[] };
 
-type PassCreateInput = Omit<Pass, "id" | "createdAt">;
-type PassUpdateInput = Partial<Omit<Pass, "id" | "createdAt">>;
-type MemberCreateInput = Omit<Member, "id">;
-type MemberUpdateInput = Partial<Omit<Member, "id">>;
+export type PassCreateInput = z.infer<typeof passCreateSchema>;
+export type PassUpdateInput = z.infer<typeof passUpdateSchema>;
+export type MemberCreateInput = z.infer<typeof memberCreateSchema>;
+export type MemberUpdateInput = z.infer<typeof memberUpdateSchema>;
 
 const PASS_STATUSES = ["active", "inactive", "draft"] as const;
 const MEMBER_STATUSES = ["active", "inactive", "pending"] as const;
-const SERVER_OWNED_FIELDS = ["id", "createdAt"] as const;
+// guildId is server-owned: the tenant scope comes from the server-side guild
+// context, never from the payload (see docs/multi-tenancy.md).
+const SERVER_OWNED_FIELDS = ["id", "createdAt", "guildId"] as const;
 const WALLET_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isAllowedValue<T extends readonly string[]>(
-  value: unknown,
-  allowed: T
-): value is T[number] {
-  return typeof value === "string" && (allowed as readonly string[]).includes(value);
 }
 
 function validateServerOwnedFields(
@@ -45,146 +41,153 @@ function validateServerOwnedFields(
   }
 }
 
-function validateRequiredString(
-  payload: Record<string, unknown>,
-  field: string,
-  errors: FieldValidationError[]
-): string | undefined {
-  const value = payload[field];
-  if (typeof value !== "string" || value.trim().length === 0) {
-    errors.push({ field, message: `${field} is required` });
-    return undefined;
-  }
-
-  return value.trim();
+function flattenZodIssues(issues: z.ZodIssue[]): z.ZodIssue[] {
+  return issues.flatMap((issue) => {
+    // zod v4: an invalid_union issue carries `errors`, an array of per-option
+    // issue arrays.
+    if (issue.code === "invalid_union" && "errors" in issue && Array.isArray(issue.errors)) {
+      return (issue.errors as z.ZodIssue[][]).flatMap((optionIssues) =>
+        flattenZodIssues(optionIssues)
+      );
+    }
+    return issue;
+  });
 }
 
-function validateOptionalString(
-  payload: Record<string, unknown>,
-  field: string,
-  errors: FieldValidationError[]
-): string | undefined {
-  const value = payload[field];
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    errors.push({ field, message: `${field} must be a non-empty string` });
-    return undefined;
-  }
-
-  return value.trim();
-}
-
-function validateOptionalNumber(
-  payload: Record<string, unknown>,
-  field: string,
+function parseField<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  fieldName: string,
   errors: FieldValidationError[],
-  options: { integer?: boolean; nullable?: boolean } = {}
-): number | null | undefined {
-  const value = payload[field];
-  if (value === undefined) return undefined;
-  if (value === null && options.nullable) return null;
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    errors.push({ field, message: `${field} must be a number` });
-    return undefined;
-  }
+  rootInvalidTypeMessage?: string
+): T | undefined {
+  const result = schema.safeParse(value);
+  if (result.success) return result.data;
 
-  if (value < 0) {
-    errors.push({ field, message: `${field} must be greater than or equal to 0` });
-    return undefined;
-  }
+  const seen = new Set<string>();
+  for (const issue of flattenZodIssues(result.error.issues)) {
+    const path = issue.path.length > 0 ? `${fieldName}.${issue.path.join(".")}` : fieldName;
+    let message = issue.message;
 
-  if (options.integer && !Number.isInteger(value)) {
-    errors.push({ field, message: `${field} must be an integer` });
-    return undefined;
-  }
-
-  return value;
-}
-
-function validateOptionalDate(
-  payload: Record<string, unknown>,
-  field: string,
-  errors: FieldValidationError[]
-): string | undefined {
-  const value = payload[field];
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    errors.push({ field, message: `${field} must be an ISO date string` });
-    return undefined;
-  }
-
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    errors.push({ field, message: `${field} must be a valid ISO date string` });
-    return undefined;
-  }
-
-  return value;
-}
-
-function validateRequiredWallet(
-  payload: Record<string, unknown>,
-  errors: FieldValidationError[]
-): string | undefined {
-  const wallet = validateRequiredString(payload, "wallet", errors);
-  if (!wallet) return undefined;
-
-  if (!WALLET_ADDRESS_PATTERN.test(wallet)) {
-    errors.push({
-      field: "wallet",
-      message: "wallet must be a valid Ethereum address",
-    });
-    return undefined;
-  }
-
-  return wallet;
-}
-
-function validateOptionalWallet(
-  payload: Record<string, unknown>,
-  errors: FieldValidationError[]
-): string | undefined {
-  const wallet = validateOptionalString(payload, "wallet", errors);
-  if (!wallet) return undefined;
-
-  if (!WALLET_ADDRESS_PATTERN.test(wallet)) {
-    errors.push({
-      field: "wallet",
-      message: "wallet must be a valid Ethereum address",
-    });
-    return undefined;
-  }
-
-  return wallet;
-}
-
-function validateRoles(
-  payload: Record<string, unknown>,
-  errors: FieldValidationError[]
-): string[] | undefined {
-  const value = payload.roles;
-  if (value === undefined) return undefined;
-
-  if (!Array.isArray(value)) {
-    errors.push({ field: "roles", message: "roles must be an array" });
-    return undefined;
-  }
-
-  const roles: string[] = [];
-  value.forEach((role, index) => {
-    if (!isAllowedValue(role, MEMBER_ROLES)) {
-      errors.push({
-        field: `roles.${index}`,
-        message: `role must be one of: ${MEMBER_ROLES.join(", ")}`,
-      });
-      return;
+    if (issue.code === "invalid_type") {
+      if (issue.message === "Required") {
+        message = rootInvalidTypeMessage ?? `${fieldName} is required`;
+      } else if (issue.path.length > 0 && fieldName === "roles") {
+        message = `role must be one of: ${MEMBER_ROLES.join(", ")}`;
+      } else {
+        message =
+          rootInvalidTypeMessage ??
+          (issue.expected === "string"
+            ? `${path} must be a non-empty string`
+            : issue.expected === "number"
+            ? `${path} must be a number`
+            : issue.expected === "array"
+            ? `${path} must be an array`
+            : issue.message);
+      }
     }
 
-    roles.push(role);
-  });
+    const errorKey = `${path}:${message}`;
+    if (seen.has(errorKey)) continue;
+    seen.add(errorKey);
+    errors.push({ field: path, message });
+  }
 
-  return [...new Set(roles)];
+  return undefined;
 }
+
+const requiredStringField = (name: string) =>
+  z.string().trim().min(1, { message: `${name} is required` });
+
+const optionalNonEmptyStringField = (name: string) =>
+  z.string().trim().min(1, { message: `${name} must be a non-empty string` });
+
+const optionalNumberField = (name: string) =>
+  z.number({ error: `${name} must be a number` })
+    .finite({ message: `${name} must be a number` })
+    .nonnegative({ message: `${name} must be greater than or equal to 0` });
+
+const optionalIntegerField = (name: string) =>
+  optionalNumberField(name).int({ message: `${name} must be an integer` });
+
+const isoDateField = (name: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, { message: `${name} must be an ISO date string` })
+    .refine((value) => !Number.isNaN(Date.parse(value)), {
+      message: `${name} must be an ISO date string`,
+    });
+
+const requiredWalletField = z
+  .string()
+  .trim()
+  .min(1, { message: "wallet is required" })
+  .regex(WALLET_ADDRESS_PATTERN, { message: "wallet must be a valid Ethereum address" });
+
+const optionalWalletField = z
+  .string()
+  .trim()
+  .min(1, { message: "wallet must be a non-empty string" })
+  .regex(WALLET_ADDRESS_PATTERN, { message: "wallet must be a valid Ethereum address" });
+
+const rolesField = z
+  .array(
+    z.string().refine((value) => (MEMBER_ROLES as readonly string[]).includes(value), {
+      message: `role must be one of: ${MEMBER_ROLES.join(", ")}`,
+    })
+  )
+  .optional();
+
+export const passCreateSchema = z.object({
+  name: requiredStringField("name"),
+  description: requiredStringField("description"),
+  price: optionalNumberField("price").optional(),
+  maxSupply: z.union([optionalIntegerField("maxSupply"), z.null()]).optional(),
+  currentSupply: optionalIntegerField("currentSupply").optional(),
+  status: z
+    .enum(PASS_STATUSES, {
+      error: `status must be one of: ${PASS_STATUSES.join(", ")}`,
+    })
+    .optional(),
+});
+
+export const passUpdateSchema = z.object({
+  name: optionalNonEmptyStringField("name").optional(),
+  description: optionalNonEmptyStringField("description").optional(),
+  price: optionalNumberField("price").optional(),
+  maxSupply: z.union([optionalIntegerField("maxSupply"), z.null()]).optional(),
+  currentSupply: optionalIntegerField("currentSupply").optional(),
+  status: z.enum(PASS_STATUSES, {
+    error: `status must be one of: ${PASS_STATUSES.join(", ")}`,
+  }).optional(),
+});
+
+export const memberCreateSchema = z.object({
+  name: requiredStringField("name"),
+  wallet: requiredWalletField,
+  roles: rolesField,
+  status: z
+    .enum(MEMBER_STATUSES, {
+      error: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
+    })
+    .optional(),
+  joinedAt: isoDateField("joinedAt").optional(),
+  lastActive: isoDateField("lastActive").optional(),
+});
+
+export const memberUpdateSchema = z.object({
+  name: optionalNonEmptyStringField("name").optional(),
+  wallet: optionalWalletField.optional(),
+  roles: rolesField,
+  status: z.enum(MEMBER_STATUSES, {
+    error: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
+  }).optional(),
+  joinedAt: isoDateField("joinedAt").optional(),
+  lastActive: isoDateField("lastActive").optional(),
+  /** Expected version for optimistic concurrency control. */
+  version: z.number().int().positive().optional(),
+});
 
 export function malformedPayloadError(): FieldValidationError[] {
   return [{ field: "body", message: "Request body must be a valid JSON object" }];
@@ -198,42 +201,60 @@ export function validatePassCreatePayload(payload: unknown): ValidationResult<Pa
   const errors: FieldValidationError[] = [];
   validateServerOwnedFields(payload, errors);
 
-  const name = validateRequiredString(payload, "name", errors);
-  const description = validateRequiredString(payload, "description", errors);
-  const price = validateOptionalNumber(payload, "price", errors);
-  const maxSupply = validateOptionalNumber(payload, "maxSupply", errors, {
-    integer: true,
-    nullable: true,
-  });
+  const name = parseField(
+    passCreateSchema.shape.name,
+    payload.name,
+    "name",
+    errors,
+    "name is required"
+  );
+  const description = parseField(
+    passCreateSchema.shape.description,
+    payload.description,
+    "description",
+    errors,
+    "description is required"
+  );
+  const price = parseField(passCreateSchema.shape.price, payload.price, "price", errors);
+  const maxSupply = parseField(
+    passCreateSchema.shape.maxSupply,
+    payload.maxSupply,
+    "maxSupply",
+    errors,
+    "maxSupply must be a number"
+  );
   const currentSupply =
-    validateOptionalNumber(payload, "currentSupply", errors, { integer: true }) ?? 0;
-  const rawStatus = payload.status ?? "draft";
+    parseField(
+      passCreateSchema.shape.currentSupply,
+      payload.currentSupply,
+      "currentSupply",
+      errors,
+      "currentSupply must be a number"
+    ) ?? 0;
+  const status =
+    parseField(
+      passCreateSchema.shape.status,
+      payload.status ?? "draft",
+      "status",
+      errors,
+      `status must be one of: ${PASS_STATUSES.join(", ")}`
+    ) ?? "draft";
 
-  if (!isAllowedValue(rawStatus, PASS_STATUSES)) {
-    errors.push({
-      field: "status",
-      message: `status must be one of: ${PASS_STATUSES.join(", ")}`,
-    });
-  }
-
-  if (errors.length > 0 || !name || !description || !isAllowedValue(rawStatus, PASS_STATUSES)) {
+  if (errors.length > 0) {
     return { valid: false, errors };
   }
 
   const data: PassCreateInput = {
-    name,
-    description,
-    status: rawStatus,
+    name: name as string,
+    description: description as string,
+    status,
     currentSupply,
   };
 
-  if (price !== undefined && price !== null) data.price = price;
+  if (price !== undefined) data.price = price;
   if (maxSupply !== undefined) data.maxSupply = maxSupply;
 
-  return {
-    valid: true,
-    data,
-  };
+  return { valid: true, data };
 }
 
 export function validatePassUpdatePayload(payload: unknown): ValidationResult<PassUpdateInput> {
@@ -245,36 +266,42 @@ export function validatePassUpdatePayload(payload: unknown): ValidationResult<Pa
   validateServerOwnedFields(payload, errors);
 
   const data: PassUpdateInput = {};
-  const name = validateOptionalString(payload, "name", errors);
-  const description = validateOptionalString(payload, "description", errors);
-  const price = validateOptionalNumber(payload, "price", errors);
-  const maxSupply = validateOptionalNumber(payload, "maxSupply", errors, {
-    integer: true,
-    nullable: true,
-  });
-  const currentSupply = validateOptionalNumber(payload, "currentSupply", errors, {
-    integer: true,
-  });
-  const rawStatus = payload.status;
-
-  if (rawStatus !== undefined) {
-    if (!isAllowedValue(rawStatus, PASS_STATUSES)) {
-      errors.push({
-        field: "status",
-        message: `status must be one of: ${PASS_STATUSES.join(", ")}`,
-      });
-    } else {
-      data.status = rawStatus;
-    }
-  }
+  const name = parseField(passUpdateSchema.shape.name, payload.name, "name", errors);
+  const description = parseField(
+    passUpdateSchema.shape.description,
+    payload.description,
+    "description",
+    errors
+  );
+  const price = parseField(passUpdateSchema.shape.price, payload.price, "price", errors);
+  const maxSupply = parseField(
+    passUpdateSchema.shape.maxSupply,
+    payload.maxSupply,
+    "maxSupply",
+    errors,
+    "maxSupply must be a number"
+  );
+  const currentSupply = parseField(
+    passUpdateSchema.shape.currentSupply,
+    payload.currentSupply,
+    "currentSupply",
+    errors,
+    "currentSupply must be a number"
+  );
+  const status = parseField(
+    passUpdateSchema.shape.status,
+    payload.status,
+    "status",
+    errors,
+    `status must be one of: ${PASS_STATUSES.join(", ")}`
+  );
 
   if (name !== undefined) data.name = name;
   if (description !== undefined) data.description = description;
-  if (price !== undefined && price !== null) data.price = price;
+  if (price !== undefined) data.price = price;
   if (maxSupply !== undefined) data.maxSupply = maxSupply;
-  if (currentSupply !== undefined && currentSupply !== null) {
-    data.currentSupply = currentSupply;
-  }
+  if (currentSupply !== undefined) data.currentSupply = currentSupply;
+  if (status !== undefined) data.status = status;
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data };
@@ -288,37 +315,55 @@ export function validateMemberCreatePayload(payload: unknown): ValidationResult<
   const errors: FieldValidationError[] = [];
   validateServerOwnedFields(payload, errors);
 
-  const name = validateRequiredString(payload, "name", errors);
-  const wallet = validateRequiredWallet(payload, errors);
-  const roles = validateRoles(payload, errors) ?? [];
-  const rawStatus = payload.status ?? "pending";
-  const joinedAt = validateOptionalDate(payload, "joinedAt", errors) ?? new Date().toISOString();
-  const lastActive =
-    validateOptionalDate(payload, "lastActive", errors) ?? new Date().toISOString();
-
-  if (!isAllowedValue(rawStatus, MEMBER_STATUSES)) {
-    errors.push({
-      field: "status",
-      message: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
-    });
+  const name = parseField(
+    memberCreateSchema.shape.name,
+    payload.name,
+    "name",
+    errors,
+    "name is required"
+  );
+  const wallet = parseField(
+    memberCreateSchema.shape.wallet,
+    payload.wallet,
+    "wallet",
+    errors,
+    "wallet is required"
+  );
+  let normalizedWallet: string | undefined;
+  if (wallet !== undefined) {
+    if (!isValidChecksumAddress(wallet as string)) {
+      errors.push({ field: "wallet", message: "wallet must be a checksummed Ethereum address" });
+    } else {
+      normalizedWallet = normaliseAddress(wallet as string);
+    }
   }
+  const roles = parseField(memberCreateSchema.shape.roles, payload.roles, "roles", errors, "roles must be an array") ?? [];
+  const status =
+    parseField(
+      memberCreateSchema.shape.status,
+      payload.status ?? "pending",
+      "status",
+      errors,
+      `status must be one of: ${MEMBER_STATUSES.join(", ")}`
+    ) ?? "pending";
+  const joinedAt =
+    parseField(memberCreateSchema.shape.joinedAt, payload.joinedAt, "joinedAt", errors, "joinedAt must be an ISO date string") ??
+    new Date().toISOString();
+  const lastActive =
+    parseField(memberCreateSchema.shape.lastActive, payload.lastActive, "lastActive", errors, "lastActive must be an ISO date string") ??
+    new Date().toISOString();
 
-  if (
-    errors.length > 0 ||
-    !name ||
-    !wallet ||
-    !isAllowedValue(rawStatus, MEMBER_STATUSES)
-  ) {
+  if (errors.length > 0) {
     return { valid: false, errors };
   }
 
   return {
     valid: true,
     data: {
-      name,
-      wallet,
-      status: rawStatus,
-      roles,
+      name: name as string,
+      wallet: (normalizedWallet ?? wallet) as string,
+      status,
+      roles: [...new Set(roles)],
       joinedAt,
       lastActive,
     },
@@ -334,29 +379,65 @@ export function validateMemberUpdatePayload(payload: unknown): ValidationResult<
   validateServerOwnedFields(payload, errors);
 
   const data: MemberUpdateInput = {};
-  const name = validateOptionalString(payload, "name", errors);
-  const wallet = validateOptionalWallet(payload, errors);
-  const roles = validateRoles(payload, errors);
-  const joinedAt = validateOptionalDate(payload, "joinedAt", errors);
-  const lastActive = validateOptionalDate(payload, "lastActive", errors);
-  const rawStatus = payload.status;
-
-  if (rawStatus !== undefined) {
-    if (!isAllowedValue(rawStatus, MEMBER_STATUSES)) {
-      errors.push({
-        field: "status",
-        message: `status must be one of: ${MEMBER_STATUSES.join(", ")}`,
-      });
+  const name = parseField(
+    memberUpdateSchema.shape.name,
+    payload.name,
+    "name",
+    errors
+  );
+  const wallet = parseField(
+    memberUpdateSchema.shape.wallet,
+    payload.wallet,
+    "wallet",
+    errors,
+    "wallet must be a non-empty string"
+  );
+  let normalizedWallet: string | undefined;
+  if (wallet !== undefined) {
+    if (!isValidChecksumAddress(wallet as string)) {
+      errors.push({ field: "wallet", message: "wallet must be a checksummed Ethereum address" });
     } else {
-      data.status = rawStatus;
+      normalizedWallet = normaliseAddress(wallet as string);
     }
   }
+  const roles = parseField(memberUpdateSchema.shape.roles, payload.roles, "roles", errors, "roles must be an array");
+  const joinedAt = parseField(
+    memberUpdateSchema.shape.joinedAt,
+    payload.joinedAt,
+    "joinedAt",
+    errors,
+    "joinedAt must be an ISO date string"
+  );
+  const lastActive = parseField(
+    memberUpdateSchema.shape.lastActive,
+    payload.lastActive,
+    "lastActive",
+    errors,
+    "lastActive must be an ISO date string"
+  );
+  const status = parseField(
+    memberUpdateSchema.shape.status,
+    payload.status,
+    "status",
+    errors,
+    `status must be one of: ${MEMBER_STATUSES.join(", ")}`
+  );
+
+  const version = parseField(
+    memberUpdateSchema.shape.version,
+    payload.version,
+    "version",
+    errors,
+    "version must be a positive integer"
+  );
 
   if (name !== undefined) data.name = name;
-  if (wallet !== undefined) data.wallet = wallet;
-  if (roles !== undefined) data.roles = roles;
+  if (wallet !== undefined) data.wallet = normalizedWallet ?? wallet;
+  if (roles !== undefined) data.roles = roles ? [...new Set(roles)] : [];
   if (joinedAt !== undefined) data.joinedAt = joinedAt;
   if (lastActive !== undefined) data.lastActive = lastActive;
+  if (status !== undefined) data.status = status;
+  if (version !== undefined) data.version = version;
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data };

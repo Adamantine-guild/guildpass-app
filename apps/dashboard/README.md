@@ -30,6 +30,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `/integrations` | Manage integrations and view status |
 | `/settings` | App settings |
 
+In mock mode, append `?mockState=error` or `?mockState=empty` to
+`/guilds` or `/integrations` to preview and test their non-happy-path UI.
+
 ---
 
 ## Scripts

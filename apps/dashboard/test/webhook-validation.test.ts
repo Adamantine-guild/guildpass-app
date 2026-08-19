@@ -18,7 +18,7 @@ test("validateWebhookPayload accepts a valid payload", () => {
     id: "evt_123",
     type: "membership.created",
     created: 1715000000,
-    data: { name: "Alice", wallet: "0xabc" },
+    data: { name: "Alice", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
   };
   const result = validateWebhookPayload(JSON.stringify(validPayload));
   assert.strictEqual(result.valid, true);

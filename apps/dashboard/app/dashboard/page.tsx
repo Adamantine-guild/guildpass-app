@@ -3,43 +3,56 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import LastUpdated from "@/components/LastUpdated";
 import StatCard from "@/components/StatCard";
+import { StatCardSkeleton } from "@/components/StatCardSkeleton";
 import StatusBadge from "@/components/StatusBadge";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
 import { ApiClientError, readApiResult } from "@/lib/api-client";
 import { getClientApiMode } from "@/lib/client-env";
 import { getActivityRefreshConfig } from "@/lib/env";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
-import { mockGuilds, mockMembers, mockPasses, type Member as MockMember } from "@/lib/mock-data";
+import type { mockPasses} from "@/lib/mock-data";
+import { mockGuilds, type Member as MockMember } from "@/lib/mock-data";
+import { getMembersForGuild, getPassesForGuild } from "@/lib/data/guild-scoped";
+import { guildFetch } from "@/lib/guild/api";
+import { useGuild } from "@/lib/guild/GuildProvider";
 import type { PaginatedResult } from "@/lib/repositories/types";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type UnsupportedResource = "passes" | "guilds" | "members";
 
 export default function DashboardPage() {
-  const { events, lastUpdated, refresh, refreshing } = useActivityFeed({ limit: 5 });
+  const { guildId, guild } = useGuild();
+  const { events, lastUpdated, refresh, refreshing } = useActivityFeed({
+    limit: 5,
+    guildId,
+  });
   const { intervalMs } = getActivityRefreshConfig();
   const apiMode = getClientApiMode();
 
-  const [passesCount, setPassesCount] = useState(mockPasses.length);
-  const [guildsCount, setGuildsCount] = useState(mockGuilds.length);
-  const [activeMembersCount, setActiveMembersCount] = useState(
-    mockMembers.filter((m) => m.status === "active").length
-  );
+  const scopedPasses = useMemo(() => getPassesForGuild(guildId), [guildId]);
+  const scopedMembers = useMemo(() => getMembersForGuild(guildId), [guildId]);
+
+  const [passesCount, setPassesCount] = useState<number | null>(null);
+  const [guildsCount, setGuildsCount] = useState<number | null>(null);
+  const [activeMembersCount, setActiveMembersCount] = useState<number | null>(null);
   const [unsupportedResources, setUnsupportedResources] = useState<UnsupportedResource[]>([]);
   const [hasError, setHasError] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
     async function load() {
+      setStatsLoading(true);
       const unsupported: UnsupportedResource[] = [];
       let encounteredError = false;
 
       try {
         const [passesRes, guildsRes, membersRes] = await Promise.all([
-          fetch("/api/passes?limit=1"),
+          guildFetch("/api/passes?limit=1", guildId),
           fetch("/api/guilds"),
-          fetch("/api/members?status=active&limit=1"),
+          guildFetch("/api/members?status=active&limit=1", guildId),
         ]);
 
         const [passes, guilds, members] = await Promise.all([
@@ -65,6 +78,7 @@ export default function DashboardPage() {
       if (mounted) {
         setUnsupportedResources(unsupported);
         setHasError(encounteredError);
+        setStatsLoading(false);
       }
     }
 
@@ -72,7 +86,7 @@ export default function DashboardPage() {
     return () => {
       mounted = false;
     };
-  }, [apiMode]);
+  }, [apiMode, guildId]);
 
   const allUnsupported =
     unsupportedResources.length === 3 ||
@@ -82,7 +96,10 @@ export default function DashboardPage() {
       ));
 
   return (
-    <DashboardLayout title="Dashboard">
+    <DashboardLayout
+      title="Dashboard"
+      subtitle={guild ? `Scoped to ${guild.name}` : undefined}
+    >
       {allUnsupported && (
         <UnsupportedBanner
           resource="dashboard"
@@ -104,13 +121,20 @@ export default function DashboardPage() {
           </p>
         </div>
       )}
-
-      <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total Passes" value={passesCount} icon="P" trend="+2 this week" />
-        <StatCard title="Active Guilds" value={guildsCount} icon="G" trend="+1 this week" />
-        <StatCard title="Active Members" value={activeMembersCount} icon="M" trend="+12 this week" />
-        <StatCard title="Total Activity" value={events.length} icon="A" trend="live" />
-      </div>
+      
+      {statsLoading ? (
+        <StatCardSkeleton />
+      ) : (
+        <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <StatCard title="Total Passes" value={passesCount ?? scopedPasses.length} icon="P" trend="+2 this week" />
+          <StatCard title="Active Guilds" value={guildsCount ?? mockGuilds.length} icon="G" trend="+1 this week" />
+          <StatCard title="Active Members" value={activeMembersCount ?? scopedMembers.filter((m) => m.status === "active").length} icon="M" trend="+12 this week" />
+          <StatCard title="Total Activity" value={events.length} icon="A" trend="live" />
+        </div>
+      )}
+          
+          
+          
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-6">
@@ -134,8 +158,11 @@ export default function DashboardPage() {
                 <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary-500" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-slate-800">{activity.description}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {new Date(activity.timestamp).toLocaleString()}
+                  <p
+                    className="mt-0.5 text-xs text-slate-500"
+                    title={new Date(activity.timestamp).toLocaleString()}
+                  >
+                    {formatRelativeTime(activity.timestamp)}
                   </p>
                 </div>
               </li>
@@ -151,7 +178,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <ul className="space-y-3">
-              {mockPasses.slice(0, 4).map((pass) => (
+              {scopedPasses.slice(0, 4).map((pass) => (
                 <li key={pass.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
                   <div>
                     <p className="font-medium text-slate-800">{pass.name}</p>

@@ -13,6 +13,9 @@ import {
   guildRepositoryContract,
   memberRepositoryContract,
   activityRepositoryContract,
+  passRepositoryIsolationContract,
+  memberRepositoryIsolationContract,
+  activityRepositoryIsolationContract,
 } from "./contracts";
 import {
   MockPassRepository,
@@ -25,3 +28,9 @@ passRepositoryContract(() => new MockPassRepository());
 guildRepositoryContract(() => new MockGuildRepository());
 memberRepositoryContract(() => new MockMemberRepository());
 activityRepositoryContract(() => new MockActivityRepository());
+
+// Cross-tenant isolation guarantee (docs/multi-tenancy.md): required of every
+// conforming repository implementation, mock included.
+passRepositoryIsolationContract(() => new MockPassRepository());
+memberRepositoryIsolationContract(() => new MockMemberRepository());
+activityRepositoryIsolationContract(() => new MockActivityRepository());

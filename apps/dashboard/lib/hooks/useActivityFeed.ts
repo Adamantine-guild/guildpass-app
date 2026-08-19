@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ActivityEvent } from "@guildpass/integration-client";
+import { type ActivityEvent, CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import { connectActivityStream } from "@/lib/activity/client-stream";
 import { filterActivityEvents, type ActivityQuery } from "@/lib/activity/query";
 import { getActivityRefreshConfig } from "@/lib/env";
 import { type Activity, fetchActivity, generateMockActivity } from "@/lib/mock-data";
+import { invalidateFromActivityEvent, queryKeys } from "@/lib/cache/query-cache";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
 
 interface UseActivityFeedOptions extends Omit<ActivityQuery, "cursor"> {
   /** How many events to request per REST page. */
@@ -14,6 +16,8 @@ interface UseActivityFeedOptions extends Omit<ActivityQuery, "cursor"> {
   refreshIntervalMs?: number;
   autoRefresh?: boolean;
   simulate?: boolean;
+  /** Tenant scope — when set, activity is filtered to this guild. */
+  guildId?: string;
 }
 
 interface UseActivityFeedResult {
@@ -43,6 +47,7 @@ function isActivityEvent(activity: Activity | ActivityEvent): activity is Activi
 
 function toActivityEvent(activity: Activity | ActivityEvent): ActivityEvent {
   if (isActivityEvent(activity)) return activity;
+
   return {
     id: activity.id,
     type: TYPE_MAP[activity.type],
@@ -51,6 +56,8 @@ function toActivityEvent(activity: Activity | ActivityEvent): ActivityEvent {
     actor: { name: activity.actor },
     timestamp: activity.timestamp,
     description: activity.description,
+    metadata: { guildId: activity.guildId },
+    schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
   };
 }
 
@@ -62,9 +69,11 @@ export function useActivityFeed({
   entityType,
   actor,
   from,
+  sort,
   refreshIntervalMs,
   autoRefresh = true,
   simulate = true,
+  guildId,
 }: UseActivityFeedOptions = {}): UseActivityFeedResult {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -82,7 +91,7 @@ export function useActivityFeed({
   const fallbackIntervalMs = refreshIntervalMs ?? config.intervalMs;
   const maxEvents = config.maxEvents;
 
-  const query = useMemo<ActivityQuery>(
+  const query = useMemo<ActivityQuery & { guildId?: string }>(
     () => ({
       limit,
       type,
@@ -91,15 +100,31 @@ export function useActivityFeed({
       entityType,
       actor: actor?.trim() || undefined,
       from,
+      sort,
+      guildId,
     }),
-    [limit, type, source, severity, entityType, actor, from]
+    [limit, type, source, severity, entityType, actor, from, sort, guildId]
   );
+  const activityQueryKey = useMemo(
+    () => queryKeys.activity(guildId ?? "unscoped", {
+      limit,
+      type,
+      source,
+      severity,
+      entityType,
+      actor: actor?.trim() || undefined,
+      from,
+      sort,
+    }),
+    [actor, entityType, from, guildId, limit, severity, source, sort, type]
+  );
+  const cacheRevision = useQueryInvalidation(activityQueryKey);
 
   const hasFilters = Boolean(type || source || severity || entityType || actor?.trim() || from);
 
   const replaceEvents = useCallback((incoming: ActivityEvent[]) => {
     setEvents((previous) => {
-      const byId = new Map(previous.map((event) => [event.id, event]));
+      const byId = new Map<string, ActivityEvent>(previous.map((event) => [event.id, event]));
       incoming.forEach((event) => byId.set(event.id, event));
       const bounded = [...byId.values()].sort(compareActivityEvents).slice(0, maxEvents);
       seenIds.current = new Set(bounded.map((event) => event.id));
@@ -157,7 +182,7 @@ export function useActivityFeed({
       setError(null);
 
       if (simulateEvent && simulate && !hasFilters) {
-        prependLiveEvent(toActivityEvent(generateMockActivity()));
+        prependLiveEvent(toActivityEvent(generateMockActivity(guildId)));
       }
     } catch {
       if (version === queryVersion.current) {
@@ -166,7 +191,7 @@ export function useActivityFeed({
     } finally {
       if (version === queryVersion.current) setLoading(false);
     }
-  }, [hasFilters, prependLiveEvent, query, replaceEvents, simulate]);
+  }, [guildId, hasFilters, prependLiveEvent, query, replaceEvents, simulate]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -247,6 +272,7 @@ export function useActivityFeed({
         stopStream = connectActivityStream({
           onEvent: (event) => {
             prependLiveEvent(event);
+            invalidateFromActivityEvent(event.type, guildId ?? "unscoped");
             scheduleReconciliation();
           },
           onFallback: startPolling,
@@ -263,7 +289,7 @@ export function useActivityFeed({
       stopStream();
       stopPolling();
     };
-  }, [autoRefresh, fallbackIntervalMs, fetchLatest, prependLiveEvent]);
+  }, [autoRefresh, cacheRevision, fallbackIntervalMs, fetchLatest, guildId, prependLiveEvent]);
 
   return {
     events,

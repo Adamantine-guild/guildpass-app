@@ -6,7 +6,9 @@
  */
 
 import type { ActivityEvent } from "../lib/activity/types";
+import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import type { Session } from "../lib/auth/session";
+import { DEFAULT_GUILD_ID } from "../lib/mock-data";
 import type { WebhookPayload } from "../lib/activity/types";
 
 export const FIXED_TIMESTAMP = "2025-01-15T12:00:00.000Z";
@@ -18,9 +20,10 @@ export function makeActivityEvent(overrides: Partial<ActivityEvent> = {}): Activ
     type: "member.joined",
     source: "dashboard",
     severity: "info",
-    actor: { name: "Alice", wallet: "0xabc" },
+    actor: { name: "Alice", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
     timestamp: FIXED_TIMESTAMP,
     description: "Alice joined the guild",
+    schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
     ...overrides,
   };
 }
@@ -44,9 +47,9 @@ export const FIXTURE_VERIFICATION_EVENT: ActivityEvent = makeActivityEvent({
   id: "evt_fixture_verify_001",
   type: "verification.completed",
   description: "Verification completed for 0xabc",
-  actor: { wallet: "0xabc" },
-  entity: { type: "verification", id: "0xabc" },
-  metadata: { wallet: "0xabc" },
+  actor: { wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
+  entity: { type: "verification", id: "0x742d35cC6634c0532925a3B8879539d43374E290" },
+  metadata: { wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
 });
 
 export function makeWebhookPayload(overrides: Partial<WebhookPayload> = {}): WebhookPayload {
@@ -54,7 +57,7 @@ export function makeWebhookPayload(overrides: Partial<WebhookPayload> = {}): Web
     id: "whk_fixture_001",
     type: "membership.created",
     created: FIXED_UNIX,
-    data: { id: "member_001", name: "Alice", wallet: "0xabc" },
+    data: { id: "member_001", name: "Alice", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
     ...overrides,
   };
 }
@@ -63,12 +66,12 @@ export const WEBHOOK_FIXTURES: Record<string, WebhookPayload> = {
   "membership.created": makeWebhookPayload({
     id: "whk_mc_001",
     type: "membership.created",
-    data: { id: "member_001", name: "Alice", wallet: "0xabc" },
+    data: { id: "member_001", name: "Alice", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
   }),
   "membership.updated": makeWebhookPayload({
     id: "whk_mu_001",
     type: "membership.updated",
-    data: { id: "member_001", name: "Alice", wallet: "0xabc" },
+    data: { id: "member_001", name: "Alice", wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
   }),
   "pass.created": makeWebhookPayload({
     id: "whk_pc_001",
@@ -88,20 +91,25 @@ export const WEBHOOK_FIXTURES: Record<string, WebhookPayload> = {
   "verification.completed": makeWebhookPayload({
     id: "whk_vc_001",
     type: "verification.completed",
-    data: { wallet: "0xabc" },
+    data: { wallet: "0x742d35cC6634c0532925a3B8879539d43374E290" },
   }),
 };
 
 export const SESSION_ADMIN: Session = {
   userId: "test-admin-001",
   name: "Test Admin",
+  roles: { [DEFAULT_GUILD_ID]: "admin" },
+  activeGuildId: DEFAULT_GUILD_ID,
   role: "admin",
+  csrfToken: "mock-csrf-token-for-development-only",
   permissions: ["passes:read", "passes:write", "members:read", "members:write", "guilds:read", "guilds:write", "activity:read", "settings:read", "settings:write"],
 };
 
 export const SESSION_MODERATOR: Session = {
   userId: "test-mod-001",
   name: "Test Moderator",
+  roles: { [DEFAULT_GUILD_ID]: "moderator" },
+  activeGuildId: DEFAULT_GUILD_ID,
   role: "moderator",
   permissions: ["passes:read", "members:read", "members:write", "guilds:read", "activity:read", "settings:read"],
 };
@@ -109,6 +117,8 @@ export const SESSION_MODERATOR: Session = {
 export const SESSION_READONLY: Session = {
   userId: "test-readonly-001",
   name: "Test Viewer",
+  roles: { [DEFAULT_GUILD_ID]: "readonly" },
+  activeGuildId: DEFAULT_GUILD_ID,
   role: "readonly",
   permissions: ["passes:read", "members:read", "guilds:read", "activity:read", "settings:read"],
 };
@@ -116,7 +126,10 @@ export const SESSION_READONLY: Session = {
 export const SESSION_OWNER: Session = {
   userId: "test-owner-001",
   name: "Test Owner",
+  roles: { [DEFAULT_GUILD_ID]: "owner" },
+  activeGuildId: DEFAULT_GUILD_ID,
   role: "owner",
+  csrfToken: "mock-csrf-token-for-development-only",
   permissions: ["passes:read", "passes:write", "members:read", "members:write", "guilds:read", "guilds:write", "activity:read", "settings:read", "settings:write"],
 };
 

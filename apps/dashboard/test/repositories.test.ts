@@ -18,17 +18,21 @@ import {
 process.env.DASHBOARD_STORAGE_MODE = "mock";
 process.env.DASHBOARD_API_MODE = "mock";
 
+// Pass/member repositories are guild-scoped; the seeded mock data belongs to
+// guild "1" (DEFAULT_GUILD_ID).
+const GUILD = "1";
+
 test("Repository Factory: MockPassRepository", async () => {
   clearRepositories();
 
   const repo = getPassRepository();
   assert.ok(repo, "Pass repository should be created");
 
-  const passes = await repo.getAll();
+  const passes = await repo.getAll(GUILD);
   assert.ok(Array.isArray(passes), "Should return array of passes");
 
   // Test create
-  const newPass = await repo.create({
+  const newPass = await repo.create(GUILD, {
     name: "Test Pass",
     price: 1.0,
     description: "Test description",
@@ -39,20 +43,72 @@ test("Repository Factory: MockPassRepository", async () => {
   assert.strictEqual(newPass.name, "Test Pass", "Pass name should match");
 
   // Test getById
-  const retrieved = await repo.getById(newPass.id);
+  const retrieved = await repo.getById(GUILD, newPass.id);
   assert.ok(retrieved, "Should retrieve created pass");
   assert.strictEqual(retrieved.id, newPass.id, "Retrieved pass id should match");
 
   // Test update
-  const updated = await repo.update(newPass.id, { price: 2.0 });
+  const updated = await repo.update(GUILD, newPass.id, { price: 2.0 });
   assert.strictEqual(updated?.price, 2.0, "Updated price should reflect");
 
   // Test delete
-  const deleted = await repo.delete(newPass.id);
+  const deleted = await repo.delete(GUILD, newPass.id);
   assert.strictEqual(deleted, true, "Delete should return true");
 
-  const notFound = await repo.getById(newPass.id);
+  const notFound = await repo.getById(GUILD, newPass.id);
   assert.strictEqual(notFound, null, "Deleted pass should not be found");
+});
+
+test("Repository Factory: MockPassRepository returns consistent pagination at boundaries", async () => {
+  clearRepositories();
+
+  const repo = getPassRepository();
+
+  const outOfRangePage = await repo.query(GUILD, { limit: 2, page: 3 });
+  assert.deepStrictEqual(
+    {
+      itemIds: outOfRangePage.items.map((pass) => pass.id),
+      total: outOfRangePage.total,
+      limit: outOfRangePage.limit,
+      page: outOfRangePage.page,
+      nextCursor: outOfRangePage.nextCursor,
+      hasNextPage: outOfRangePage.hasNextPage,
+      hasPreviousPage: outOfRangePage.hasPreviousPage,
+    },
+    {
+      itemIds: [],
+      total: 4,
+      limit: 2,
+      page: 3,
+      nextCursor: null,
+      hasNextPage: false,
+      hasPreviousPage: true,
+    },
+    "Out-of-range pass pages should keep pagination metadata consistent"
+  );
+
+  const oversizedLimit = await repo.query(GUILD, { limit: 99, page: 1 });
+  assert.deepStrictEqual(
+    {
+      itemIds: oversizedLimit.items.map((pass) => pass.id),
+      total: oversizedLimit.total,
+      limit: oversizedLimit.limit,
+      page: oversizedLimit.page,
+      nextCursor: oversizedLimit.nextCursor,
+      hasNextPage: oversizedLimit.hasNextPage,
+      hasPreviousPage: oversizedLimit.hasPreviousPage,
+    },
+    {
+      itemIds: ["1", "2", "3", "4"],
+      total: 4,
+      limit: 50,
+      page: 1,
+      nextCursor: null,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    },
+    "Oversized pass limits should be clamped while returning all available matches"
+  );
 });
 
 test("Repository Factory: MockGuildRepository", async () => {
@@ -84,11 +140,11 @@ test("Repository Factory: MockMemberRepository", async () => {
   const repo = getMemberRepository();
   assert.ok(repo, "Member repository should be created");
 
-  const members = await repo.getAll();
+  const members = await repo.getAll(GUILD);
   assert.ok(Array.isArray(members), "Should return array of members");
 
   // Test create
-  const newMember = await repo.create({
+  const newMember = await repo.create(GUILD, {
     wallet: "0x999zzz",
     name: "Charlie",
     status: "active",
@@ -100,17 +156,46 @@ test("Repository Factory: MockMemberRepository", async () => {
   assert.strictEqual(newMember.wallet, "0x999zzz", "Member wallet should match");
 
   // Test getByWallet
-  const byWallet = await repo.getByWallet("0x999zzz");
+  const byWallet = await repo.getByWallet(GUILD, "0x999zzz");
   assert.ok(byWallet, "Should find member by wallet");
   assert.strictEqual(byWallet.id, newMember.id, "Located member should match created");
 
   // Test update
-  const updated = await repo.update(newMember.id, { status: "inactive" });
+  const updated = await repo.update(GUILD, newMember.id, { status: "inactive" });
   assert.strictEqual(updated?.status, "inactive", "Updated status should reflect");
 
   // Wallet index should still work after update
-  const stillFound = await repo.getByWallet("0x999zzz");
+  const stillFound = await repo.getByWallet(GUILD, "0x999zzz");
   assert.ok(stillFound, "Member should still be findable by wallet after update");
+});
+
+test("Repository Factory: MockMemberRepository returns consistent pagination for zero-match searches", async () => {
+  clearRepositories();
+
+  const repo = getMemberRepository();
+  const result = await repo.query(GUILD, { search: "no-such-wallet", limit: 2, page: 1 });
+
+  assert.deepStrictEqual(
+    {
+      items: result.items,
+      total: result.total,
+      limit: result.limit,
+      page: result.page,
+      nextCursor: result.nextCursor,
+      hasNextPage: result.hasNextPage,
+      hasPreviousPage: result.hasPreviousPage,
+    },
+    {
+      items: [],
+      total: 0,
+      limit: 2,
+      page: 1,
+      nextCursor: null,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    },
+    "Zero-match member searches should return an empty, well-formed paginated result"
+  );
 });
 
 test("Repository Factory: MockActivityRepository", async () => {
@@ -127,13 +212,13 @@ test("Repository Factory: MockActivityRepository", async () => {
     description: "Member joined",
   };
 
-  const result1 = await repo.append(event1);
+  const result1 = await repo.append(GUILD, event1);
   assert.strictEqual(result1.type, "member.joined", "Appended event should preserve type");
   assert.ok(result1.id, "Appended event should get an id");
   assert.ok(result1.timestamp, "Appended event should get a timestamp");
 
   // Test query
-  const events = await repo.query({});
+  const events = await repo.query(GUILD, {});
   assert.ok(Array.isArray(events), "Should return array of events");
   assert.ok(events.some((event) => event.id === result1.id), "Should include appended event");
 
@@ -186,7 +271,7 @@ test("Repository Factory: Data persistence across calls", async () => {
   clearRepositories();
 
   // Create a pass
-  const pass1 = await getPassRepository().create({
+  const pass1 = await getPassRepository().create(GUILD, {
     name: "Persistent Pass",
     price: 5.0,
     description: "Should persist",
@@ -195,7 +280,7 @@ test("Repository Factory: Data persistence across calls", async () => {
   });
 
   // Create a member
-  await getMemberRepository().create({
+  await getMemberRepository().create(GUILD, {
     wallet: "0xpersist",
     name: "Persistent Member",
     status: "active",
@@ -205,23 +290,23 @@ test("Repository Factory: Data persistence across calls", async () => {
   });
 
   // Retrieve and verify
-  const retrieved = await getPassRepository().getById(pass1.id);
+  const retrieved = await getPassRepository().getById(GUILD, pass1.id);
   assert.strictEqual(retrieved?.id, pass1.id, "Pass should persist");
 
-  const memberRetrieved = await getMemberRepository().getByWallet("0xpersist");
+  const memberRetrieved = await getMemberRepository().getByWallet(GUILD, "0xpersist");
   assert.strictEqual(memberRetrieved?.wallet, "0xpersist", "Member should persist");
 
   // Verify all instances share the same data
-  const allPasses = await getPassRepository().getAll();
+  const allPasses = await getPassRepository().getAll(GUILD);
   assert.ok(allPasses.some((p) => p.id === pass1.id), "New pass should appear in getAll");
 
-  const allMembers = await getMemberRepository().getAll();
+  const allMembers = await getMemberRepository().getAll(GUILD);
   assert.ok(allMembers.some((m) => m.wallet === "0xpersist"), "New member should appear in getAll");
 });
 
 test("Repository Factory: Clear repositories", async () => {
   // Create a pass
-  await getPassRepository().create({
+  await getPassRepository().create(GUILD, {
     name: "Will be cleared",
     price: 1.0,
     description: "Test",
@@ -233,7 +318,7 @@ test("Repository Factory: Clear repositories", async () => {
   clearRepositories();
 
   // Create new factory and verify fresh state
-  await getPassRepository().create({
+  await getPassRepository().create(GUILD, {
     name: "After clear",
     price: 2.0,
     description: "Should be fresh",
@@ -242,26 +327,21 @@ test("Repository Factory: Clear repositories", async () => {
   });
 
   // The cleared repository should have fresh mock data
-  const allPasses = await getPassRepository().getAll();
+  const allPasses = await getPassRepository().getAll(GUILD);
   assert.ok(allPasses.some((p) => p.name === "After clear"), "Should have new pass");
 });
 
-test("Repository Factory: Error handling in durable mode stub", async () => {
-  // This test validates that durable adapters throw appropriate errors
-  // when not yet implemented
-
+test("Repository Factory: durable mode instantiates durable repositories", async () => {
   process.env.DASHBOARD_STORAGE_MODE = "durable";
   process.env.DATABASE_URL = "postgresql://localhost/test";
 
   clearRepositories();
 
-  try {
-    const repo = getPassRepository();
-    await repo.getAll();
-    assert.fail("Should throw 'not yet implemented'");
-  } catch (error: any) {
-    assert.ok(error.message.includes("not yet implemented"), "Durable adapter should throw informative error");
-  }
+  const factory = getRepositoryFactory();
+  const repo = factory.passRepository();
+
+  assert.ok(repo, "Durable pass repository should be created");
+  assert.equal(typeof repo.getAll, "function", "Durable repository should expose the standard API");
 
   // Reset to mock
   process.env.DASHBOARD_STORAGE_MODE = "mock";

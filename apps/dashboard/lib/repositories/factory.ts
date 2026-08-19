@@ -1,6 +1,10 @@
 /**
  * Repository factory: selects and instantiates repositories based on storage mode.
  * This is the single point of configuration for all data persistence.
+ *
+ * Durable mode: all repositories share a single pg.Pool created lazily in
+ * `lib/db.ts`. The connection string passed to each constructor is retained
+ * for API compatibility but the adapters route all queries through the pool.
  */
 
 import type { IRepositoryFactory, IPassRepository, IGuildRepository, IMemberRepository, IActivityRepository, ISettingsRepository } from "./types";
@@ -35,15 +39,18 @@ export function getRepositoryFactory(): IRepositoryFactory {
   if (mode === "mock") {
     return {
       passRepository() {
-        if (!mockPassRepo) mockPassRepo = new MockPassRepository();
+        if (!mockActivityRepo) mockActivityRepo = new MockActivityRepository();
+        if (!mockPassRepo) mockPassRepo = new MockPassRepository(mockActivityRepo);
         return mockPassRepo;
       },
       guildRepository() {
-        if (!mockGuildRepo) mockGuildRepo = new MockGuildRepository();
+        if (!mockActivityRepo) mockActivityRepo = new MockActivityRepository();
+        if (!mockGuildRepo) mockGuildRepo = new MockGuildRepository(mockActivityRepo);
         return mockGuildRepo;
       },
       memberRepository() {
-        if (!mockMemberRepo) mockMemberRepo = new MockMemberRepository();
+        if (!mockActivityRepo) mockActivityRepo = new MockActivityRepository();
+        if (!mockMemberRepo) mockMemberRepo = new MockMemberRepository(mockActivityRepo);
         return mockMemberRepo;
       },
       activityRepository() {
@@ -51,7 +58,8 @@ export function getRepositoryFactory(): IRepositoryFactory {
         return mockActivityRepo;
       },
       settingsRepository() {
-        if (!mockSettingsRepo) mockSettingsRepo = new MockSettingsRepository();
+        if (!mockActivityRepo) mockActivityRepo = new MockActivityRepository();
+        if (!mockSettingsRepo) mockSettingsRepo = new MockSettingsRepository(mockActivityRepo);
         return mockSettingsRepo;
       },
     };
@@ -63,15 +71,18 @@ export function getRepositoryFactory(): IRepositoryFactory {
 
     return {
       passRepository() {
-        if (!durablePassRepo) durablePassRepo = new DurablePassRepository(connectionString);
+        if (!durableActivityRepo) durableActivityRepo = new DurableActivityRepository(connectionString);
+        if (!durablePassRepo) durablePassRepo = new DurablePassRepository(connectionString, durableActivityRepo);
         return durablePassRepo;
       },
       guildRepository() {
-        if (!durableGuildRepo) durableGuildRepo = new DurableGuildRepository(connectionString);
+        if (!durableActivityRepo) durableActivityRepo = new DurableActivityRepository(connectionString);
+        if (!durableGuildRepo) durableGuildRepo = new DurableGuildRepository(connectionString, durableActivityRepo);
         return durableGuildRepo;
       },
       memberRepository() {
-        if (!durableMemberRepo) durableMemberRepo = new DurableMemberRepository(connectionString);
+        if (!durableActivityRepo) durableActivityRepo = new DurableActivityRepository(connectionString);
+        if (!durableMemberRepo) durableMemberRepo = new DurableMemberRepository(connectionString, durableActivityRepo);
         return durableMemberRepo;
       },
       activityRepository() {
@@ -79,7 +90,8 @@ export function getRepositoryFactory(): IRepositoryFactory {
         return durableActivityRepo;
       },
       settingsRepository() {
-        if (!durableSettingsRepo) durableSettingsRepo = new DurableSettingsRepository(connectionString);
+        if (!durableActivityRepo) durableActivityRepo = new DurableActivityRepository(connectionString);
+        if (!durableSettingsRepo) durableSettingsRepo = new DurableSettingsRepository(connectionString, durableActivityRepo);
         return durableSettingsRepo;
       },
     };

@@ -8,9 +8,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
+    "start:shard": "node dist/shard.js",
     "dev": "tsx src/index.ts",
+    "dev:shard": "tsx src/shard.ts",
     "register:commands": "tsx scripts/register-commands.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@discordjs/rest": "^2.6.1",
@@ -19,6 +22,7 @@
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
+    "@types/node": "^26.1.1",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0",
     "@types/node": "^20.17.6"

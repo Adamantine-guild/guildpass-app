@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./apps/access-api" },
+    { "path": "./apps/dashboard" },
+    { "path": "./apps/discord-bot" },
+    { "path": "./packages/contracts" },
+    { "path": "./packages/env" },
+    { "path": "./packages/integration-client" },
+    { "path": "./packages/webhook-utils" }
+  ]
+}

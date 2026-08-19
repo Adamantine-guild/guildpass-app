@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ActivityEvent } from "../lib/activity/types.js";
+import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import { validateWebhookPayload } from "../lib/activity/validation.js";
 import { sanitiseWebhookData, getSanitisedDescription } from "../lib/activity/sanitise.js";
 
@@ -59,6 +60,7 @@ describe("Webhook Ingestion", () => {
       actor: {
         name: "Admin",
       },
+      schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
     };
 
     await activityStorage.addEvent(event);
@@ -86,7 +88,8 @@ describe("Webhook Ingestion", () => {
           name: "Alice"
         },
         timestamp: new Date().toISOString(),
-        description: "New member joined: Alice"
+        description: "New member joined: Alice",
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
 
       assert.strictEqual(await firstStore.recordActivityEvent(event), "recorded");
@@ -113,7 +116,8 @@ describe("Webhook Ingestion", () => {
           name: "Admin"
         },
         timestamp: new Date().toISOString(),
-        description: "Pass updated: Gold Pass"
+        description: "Pass updated: Gold Pass",
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
 
       const results = await Promise.all([
@@ -140,7 +144,7 @@ function validPayload(overrides: Record<string, unknown> = {}): string {
     id: "evt_val_1",
     type: "membership.created",
     created: Math.floor(Date.now() / 1000),
-    data: { wallet: "0xabc", name: "Bob" },
+    data: { wallet: "0x742d35cC6634c0532925a3B8879539d43374E290", name: "Bob" },
     ...overrides,
   });
 }

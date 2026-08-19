@@ -1,4 +1,5 @@
 import type { ActivityEvent, ActivityEventType, ActivityEventEntity, ActivityEventSeverity } from "./types";
+import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 import { getActivityRepository } from "@/lib/repositories/factory";
 import type { Session } from "@/lib/auth/session";
 import { publishActivityEvent } from "./stream";
@@ -9,6 +10,7 @@ interface DashboardActivityInput {
   actor?: { id?: string; name?: string; wallet?: string };
   description?: string;
   severity?: ActivityEventSeverity;
+  metadata?: Record<string, any>;
 }
 
 function safeDescription(type: ActivityEventType, entity?: ActivityEventEntity): string {
@@ -45,15 +47,18 @@ function actorFromSession(session?: Session): { id?: string; name?: string; wall
 }
 
 export async function recordDashboardActivity(
+  guildId: string,
   input: DashboardActivityInput
 ): Promise<ActivityEvent> {
-  const event = await getActivityRepository().append({
+  const event = await getActivityRepository().append(guildId, {
     type: input.type,
     source: "dashboard",
     severity: input.severity ?? "info",
     actor: input.actor ?? { name: "Admin" },
     description: input.description ?? safeDescription(input.type, input.entity),
     entity: input.entity,
+    metadata: input.metadata,
+    schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
   });
   publishActivityEvent(event);
   return event;

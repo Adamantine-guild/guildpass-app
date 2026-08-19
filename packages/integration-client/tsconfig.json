@@ -1,9 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "5.0",
     "rootDir": "src",
     "outDir": "dist",
-    "composite": false
+    "composite": true
   },
   "include": ["src"]
 }

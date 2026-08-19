@@ -1,13 +1,38 @@
-import type { HttpRequestOptions, TransportConfig } from "./http.types.js";
+import {
+  type HttpRequestOptions,
+  type TransportConfig,
+  DEFAULT_RETRY_CONFIG,
+} from "./http.types.js";
+import {
+  CircuitBreaker,
+  CircuitOpenError,
+  type CircuitBreakerStatus,
+} from "./circuitBreaker.js";
+import { TimeoutError, UpstreamError, NetworkError } from "./errors.js";
 
 export class HttpClient {
   private config: TransportConfig;
+  private breaker?: CircuitBreaker;
 
   constructor(config: TransportConfig = {}) {
-    this.config = config;
+    this.config = {
+      ...config,
+      retry: config.retry === undefined ? DEFAULT_RETRY_CONFIG : config.retry,
+    };
+    if (config.circuitBreaker) {
+      this.breaker = new CircuitBreaker(config.circuitBreaker);
+    }
   }
 
-  async request(url: string, options: HttpRequestOptions = {}): Promise<Response> {
+  async request(
+    url: string,
+    options: HttpRequestOptions = {},
+  ): Promise<Response> {
+    if (this.breaker && !this.breaker.canRequest()) {
+      const status = this.breaker.getStatus();
+      throw new CircuitOpenError(status.retryAt ?? Date.now());
+    }
+
     const {
       timeout = this.config.timeout,
       retry = this.config.retry,
@@ -18,6 +43,7 @@ export class HttpClient {
     const fetchFn = this.config.fetch ?? fetch;
     const maxAttempts = retry?.maxAttempts ?? 1;
     let attempt = 0;
+    let lastError: Error | undefined;
 
     while (attempt < maxAttempts) {
       attempt++;
@@ -29,14 +55,15 @@ export class HttpClient {
       };
 
       if (externalSignal) {
-        if (externalSignal.aborted) throw externalSignal.reason ?? new Error("Aborted");
+        if (externalSignal.aborted)
+          throw externalSignal.reason ?? new Error("Aborted");
         externalSignal.addEventListener("abort", onAbort);
       }
 
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       if (timeout) {
         timeoutId = setTimeout(() => {
-          controller.abort(new Error(`Timeout: Request exceeded ${timeout}ms`));
+          controller.abort(new TimeoutError(timeout));
         }, timeout);
       }
 
@@ -46,31 +73,89 @@ export class HttpClient {
           signal,
         });
 
-        if (response.ok || attempt >= maxAttempts || !this.isTransient(response.status)) {
+        if (response.ok) {
+          if (this.breaker) this.breaker.recordSuccess();
           return response;
         }
 
-        // Transient failure, prepare for retry
+        // Treat 404 as a non-error response; return it for caller to handle.
+        if (response.status === 404) {
+          // Do not record circuit breaker failure for 404.
+          return response;
+        }
+
+        // Non-OK response: check if we should retry (transient) or fail.
+        if (attempt >= maxAttempts || !this.isTransient(response.status)) {
+          throw new UpstreamError(response.status, response.statusText);
+        }
+
+        // Transient status — will retry after the loop body ends.
+        lastError = new UpstreamError(response.status, response.statusText);
       } catch (error: any) {
-        if (externalSignal?.aborted && (error === externalSignal.reason || error.name === "AbortError")) {
+        // If the external signal was aborted by the caller, re-throw as-is.
+        if (
+          externalSignal?.aborted &&
+          (error === externalSignal.reason || error.name === "AbortError")
+        ) {
           throw externalSignal.reason ?? error;
         }
+
+        // If this is already one of our typed errors, capture it for re-throw.
+        if (
+          error instanceof TimeoutError ||
+          error instanceof UpstreamError ||
+          error instanceof CircuitOpenError
+        ) {
+          lastError = error;
+        } else {
+          // Wrap raw fetch/network errors.
+          lastError =
+            error instanceof Error
+              ? new NetworkError(error)
+              : new NetworkError(error);
+        }
+
+        // If this is the last attempt, give up.
         if (attempt >= maxAttempts) {
+          this.breaker?.recordFailure();
+          throw lastError;
+        }
+
+        // TimeoutError and network errors are retryable.
+        if (error instanceof TimeoutError || error instanceof NetworkError) {
+          // Continue to retry below.
+        } else if (
+          error instanceof UpstreamError &&
+          this.isTransient(error.status)
+        ) {
+          // Transient 5xx/429 is retryable — continue.
+        } else {
+          // Non-retryable upstream error — fail immediately.
+          this.breaker?.recordFailure();
           throw error;
         }
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
-        if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+        if (externalSignal)
+          externalSignal.removeEventListener("abort", onAbort);
       }
 
-      if (retry) {
+      // Exponential backoff before next attempt.
+      if (retry && attempt < maxAttempts) {
         const delay = retry.delay ?? 1000;
-        const sleepTime = retry.backoff ? delay * Math.pow(2, attempt - 1) : delay;
+        const sleepTime = retry.backoff
+          ? delay * Math.pow(2, attempt - 1)
+          : delay;
         await new Promise((resolve) => setTimeout(resolve, sleepTime));
       }
     }
 
-    throw new Error("Request failed after max attempts");
+    this.breaker?.recordFailure();
+    throw lastError ?? new Error("Request failed after max attempts");
+  }
+
+  getStatus(): CircuitBreakerStatus | null {
+    return this.breaker ? this.breaker.getStatus() : null;
   }
 
   private isTransient(status: number): boolean {

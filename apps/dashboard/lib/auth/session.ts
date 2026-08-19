@@ -5,7 +5,7 @@
  *
  * Contains:
  *  - Role and Permission type unions
- *  - Session interface
+ *  - Session interface (includes CSRF token field)
  *  - ROLE_PERMISSIONS matrix — what each role is allowed to do
  *  - Mock sessions for all four roles (dev/test use)
  *  - MOCK_SESSION — the active mock session (change MOCK_ACTIVE_ROLE to switch)
@@ -15,26 +15,15 @@
  *     backend authentication is wired up.
  */
 
-// ── Roles ─────────────────────────────────────────────────────────────────────
+import { MOCK_CSRF_TOKEN } from "./csrf";
 
-/**
- * The four supported dashboard roles, ordered from most to least privileged.
- *
- * owner      – Full control; identical permissions to admin in this matrix.
- *              Intended for the guild creator / contract deployer.
- * admin      – Full read + write access to all resources.
- * moderator  – Can read everything and manage members, but cannot create/edit
- *              passes or change guild/workspace settings.
- * readonly   – Read-only access across the board; no mutation capability.
- */
+// ── Roles ─────────────────────────────────────────────────────────────────────
+/** Guild-scoped authorization model for the dashboard. */
+
+import { DEFAULT_GUILD_ID } from "@/lib/mock-data";
+
 export type Role = "owner" | "admin" | "moderator" | "readonly";
 
-// ── Permissions ───────────────────────────────────────────────────────────────
-
-/**
- * Exhaustive set of permission strings recognised by the dashboard.
- * Format: `<resource>:<action>`
- */
 export type Permission =
   | "passes:read"
   | "passes:write"
@@ -46,127 +35,65 @@ export type Permission =
   | "settings:read"
   | "settings:write";
 
-// ── Session interface ─────────────────────────────────────────────────────────
+/**
+ * A user's role assignments keyed by the guild they belong to. A missing key
+ * is intentionally not a role: users have no access to guilds they do not
+ * explicitly belong to.
+ */
+export type GuildRoles = Record<string, Role>;
 
 export interface Session {
-  /** Opaque user identifier (wallet address, UUID, etc.) */
   userId: string;
-  /** Display name shown in the sidebar role badge */
   name: string;
-  /** The user's single assigned role */
-  role: Role;
+  roles: GuildRoles;
+  /** Guild selected by the current dashboard context. */
+  activeGuildId: string;
   /**
-   * Flat list of permissions granted to this session.
-   * Derived from ROLE_PERMISSIONS[role] at session-creation time so that
-   * individual permission checks are O(1) array includes.
+   * CSRF token bound to this session.
+   * Used for the double-submit cookie pattern: the server sets this as a cookie,
+   * and the client reads the cookie and sends it back as an X-CSRF-Token header
+   * on every mutating request. This prevents cross-site request forgery attacks.
+   * Optional: only cookie-based browser sessions carry one — sessions resolved
+   * from bearer tokens (Authorization header) are not CSRF-vulnerable and do
+   * not need it.
    */
+  csrfToken?: string;
+
+  /** @deprecated Migration-only compatibility field. Do not authorize with it. */
+  role?: Role;
+  /** @deprecated Migration-only compatibility field. Do not authorize with it. */
   permissions: Permission[];
 }
 
-// ── Permission matrix ─────────────────────────────────────────────────────────
-
-/**
- * Canonical source-of-truth for which permissions each role holds.
- * UI helpers and API guards both derive their decisions from this matrix.
- */
-export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  owner: [
-    "passes:read",
-    "passes:write",
-    "members:read",
-    "members:write",
-    "guilds:read",
-    "guilds:write",
-    "activity:read",
-    "settings:read",
-    "settings:write",
-  ],
-  admin: [
-    "passes:read",
-    "passes:write",
-    "members:read",
-    "members:write",
-    "guilds:read",
-    "guilds:write",
-    "activity:read",
-    "settings:read",
-    "settings:write",
-  ],
-  moderator: [
-    "passes:read",
-    "members:read",
-    "members:write",
-    "guilds:read",
-    "activity:read",
-    "settings:read",
-  ],
-  readonly: [
-    "passes:read",
-    "members:read",
-    "guilds:read",
-    "activity:read",
-    "settings:read",
-  ],
+export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  owner: ["passes:read", "passes:write", "members:read", "members:write", "guilds:read", "guilds:write", "activity:read", "settings:read", "settings:write"],
+  admin: ["passes:read", "passes:write", "members:read", "members:write", "guilds:read", "guilds:write", "activity:read", "settings:read", "settings:write"],
+  moderator: ["passes:read", "members:read", "members:write", "guilds:read", "activity:read", "settings:read"],
+  readonly: ["passes:read", "members:read", "guilds:read", "activity:read", "settings:read"],
 };
 
-// ── Mock sessions (all four roles) ───────────────────────────────────────────
+function createMockSession(role: Role, userId: string, name: string): Session {
+  return {
+    userId,
+    name,
+    roles: { [DEFAULT_GUILD_ID]: role },
+    activeGuildId: DEFAULT_GUILD_ID,
+    csrfToken: MOCK_CSRF_TOKEN,
+    // Retained temporarily for local integrations that only render the badge.
+    role,
+    permissions: [...ROLE_PERMISSIONS[role]],
+  };
+}
 
+/** Single-guild mock sessions remain convenient for local development. */
 export const MOCK_SESSIONS: Record<Role, Session> = {
-  owner: {
-    userId: "mock-owner-001",
-    name: "Owner Alice",
-    role: "owner",
-    permissions: ROLE_PERMISSIONS.owner,
-  },
-  admin: {
-    userId: "mock-admin-001",
-    name: "Admin Bob",
-    role: "admin",
-    permissions: ROLE_PERMISSIONS.admin,
-  },
-  moderator: {
-    userId: "mock-moderator-001",
-    name: "Moderator Charlie",
-    role: "moderator",
-    permissions: ROLE_PERMISSIONS.moderator,
-  },
-  readonly: {
-    userId: "mock-readonly-001",
-    name: "Viewer Diana",
-    role: "readonly",
-    permissions: ROLE_PERMISSIONS.readonly,
-  },
+  owner: createMockSession("owner", "mock-owner-001", "Owner Alice"),
+  admin: createMockSession("admin", "mock-admin-001", "Admin Bob"),
+  moderator: createMockSession("moderator", "mock-moderator-001", "Moderator Charlie"),
+  readonly: createMockSession("readonly", "mock-readonly-001", "Viewer Diana"),
 };
 
-// ── Active mock session ───────────────────────────────────────────────────────
-
-/**
- * Change this constant to simulate a different role during development.
- * Accepted values: "owner" | "admin" | "moderator" | "readonly"
- *
- * @example
- *   export const MOCK_ACTIVE_ROLE: Role = "readonly";
- */
 export const MOCK_ACTIVE_ROLE: Role = "readonly";
-
-/**
- * The session object consumed by useSession() and all permission helpers.
- * In production, replace this export with a real auth SDK call.
- */
 export const MOCK_SESSION: Session = MOCK_SESSIONS[MOCK_ACTIVE_ROLE];
-
-// ── API-layer mock session (independent from UI) ──────────────────────────────
-
-/**
- * Separate mock role for the API layer, independent from MOCK_ACTIVE_ROLE (which
- * drives the UI via useSession()). This lets you demonstrate that backend
- * enforcement is real and independent of the UI — e.g. set MOCK_ACTIVE_ROLE to
- * "admin" (UI shows write buttons) and MOCK_API_ROLE to "readonly" (API still
- * rejects every mutation with 403) to prove the backend isn't just trusting
- * the frontend.
- *
- * In production this entire export is deleted — real session resolution
- * happens per-request from the incoming JWT/cookie, not from a shared constant.
- */
 export const MOCK_API_ROLE: Role = MOCK_ACTIVE_ROLE;
 export const MOCK_API_SESSION: Session = MOCK_SESSIONS[MOCK_API_ROLE];

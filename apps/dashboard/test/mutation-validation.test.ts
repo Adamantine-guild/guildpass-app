@@ -16,7 +16,7 @@ import {
 process.env.DASHBOARD_API_MODE = "mock";
 process.env.DASHBOARD_STORAGE_MODE = "mock";
 
-const VALID_WALLET = "0x742d35Cc6634C0532925a3b8879539d43374e290";
+const VALID_WALLET = "0x742d35cC6634c0532925a3B8879539d43374E290";
 
 type MutationValidationResult =
   | ReturnType<typeof validatePassCreatePayload>
@@ -50,7 +50,7 @@ describe("pass mutation validation", () => {
       throw new Error("Expected validation to pass");
     }
 
-    const pass = await getPassRepository().create(validation.data);
+    const pass = await getPassRepository().create("1", validation.data);
     assert.equal(pass.name, "Season Pass");
     assert.equal(pass.status, "draft");
     assert.equal(pass.currentSupply, 0);
@@ -108,7 +108,7 @@ describe("member mutation validation", () => {
       throw new Error("Expected validation to pass");
     }
 
-    const member = await getMemberRepository().create(validation.data);
+    const member = await getMemberRepository().create("1", validation.data);
     assert.equal(member.name, "Ada");
     assert.equal(member.wallet, VALID_WALLET);
     assert.equal(member.status, "pending");

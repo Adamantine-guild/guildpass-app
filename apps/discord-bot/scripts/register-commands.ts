@@ -11,7 +11,8 @@ if (missing.length > 0) {
 const commands = [
   new SlashCommandBuilder().setName("verify").setDescription("Verify a wallet").addStringOption(o => o.setName("wallet").setDescription("Wallet address").setRequired(true)),
   new SlashCommandBuilder().setName("status").setDescription("Show membership status"),
-  new SlashCommandBuilder().setName("refresh-roles").setDescription("Refresh roles from GuildPass")
+  new SlashCommandBuilder().setName("refresh-roles").setDescription("Refresh roles from GuildPass"),
+  new SlashCommandBuilder().setName("guild-stats").setDescription("Show aggregate guild membership stats (moderator only)")
 ].map(c => c.toJSON()); // IC: 7
 
 async function run() {

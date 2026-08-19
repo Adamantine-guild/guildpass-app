@@ -6,11 +6,23 @@ dist
 .docusaurus
 build
 coverage
+.tsbuildinfo
 packages/*/dist
 apps/*/dist
 apps/docs/.docusaurus
 apps/docs/build
 .idea
+AGENTS.md
+update-test.js
+update-test.mjs
+temp/
+
+# Lock files
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+old-package-lock.json
 
 # Next.js build output
 .next/

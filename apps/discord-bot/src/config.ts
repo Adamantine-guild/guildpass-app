@@ -7,6 +7,7 @@ export const config = {
   guildId: process.env.DISCORD_GUILD_ID ?? "",
   coreBaseUrl: process.env.GUILD_PASS_CORE_URL ?? "",
   coreApiKey: process.env.GUILD_PASS_CORE_API_KEY ?? "",
+  dashboardUrl: process.env.GUILD_PASS_DASHBOARD_URL ?? "",
   roles: {
     admin: process.env.DISCORD_ROLE_ADMIN ?? "",
     member: process.env.DISCORD_ROLE_MEMBER ?? "",

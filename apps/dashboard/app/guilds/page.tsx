@@ -1,36 +1,68 @@
 ﻿"use client";
 
-import { getClientApiMode } from '@/lib/client-env';
+import Link from "next/link";
+import { getClientApiMode } from "@/lib/client-env";
 import DashboardLayout from "@/components/DashboardLayout";
+import GuildsListState, {
+  type GuildsListStatus,
+} from "@/components/GuildsListState";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
 import { mockGuilds, type Guild as MockGuild } from "@/lib/mock-data";
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "@/lib/hooks/useSession";
 import { canManageGuilds } from "@/lib/permissions";
 import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
-import { readApiResult } from "@/lib/api-client";
+import { ApiClientError, readApiResult } from "@/lib/api-client";
+import { useGuild } from "@/lib/guild/GuildProvider";
 
 export default function GuildsPage() {
   const session = useSession();
-  const canWrite = canManageGuilds(session);
+  const { guildId: activeGuildId, setGuildId, setGuilds: setContextGuilds } = useGuild();
+  const canWrite = canManageGuilds(session, activeGuildId);
   const [guilds, setGuilds] = useState<MockGuild[]>(mockGuilds);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
-  const [listState] = useState<"loading" | "loaded" | "unsupported" | "error">("loading");
+  const [listState, setListState] = useState<GuildsListStatus>("loading");
   const previousGuildsRef = useRef<MockGuild[]>(guilds);
   const apiMode = getClientApiMode();
 
   useEffect(() => {
     let mounted = true;
     async function load() {
+      setListState("loading");
+
       try {
-        const res = await fetch("/api/guilds");
-        const data = await readApiResult<MockGuild[]>(res);
+        const mockState =
+          apiMode === "mock"
+            ? new URLSearchParams(window.location.search).get("mockState")
+            : null;
+
+        if (mockState === "error") {
+          throw new Error("Simulated guild fetch error");
+        }
+
+        const data =
+          mockState === "empty"
+            ? []
+            : await fetch("/api/guilds").then((res) =>
+                readApiResult<MockGuild[]>(res)
+              );
+
         if (mounted) {
           setGuilds(data);
+          setContextGuilds(data);
           previousGuildsRef.current = data;
+          setListState("loaded");
         }
       } catch (err) {
-        console.warn("Falling back to mock guilds:", err);
+        if (!mounted) return;
+
+        if (err instanceof ApiClientError && err.code === "UNSUPPORTED") {
+          setListState("unsupported");
+          return;
+        }
+
+        console.warn("Failed to load guilds:", err);
+        setListState("error");
       }
     }
     void load();
@@ -128,58 +160,84 @@ export default function GuildsPage() {
         <UnsupportedBanner resource="guilds" />
       )}
 
-      {/* â”€â”€ Error banner (live mode network error) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      {listState === "error" && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 my-4">
-          <p className="text-sm text-red-700">
-            Failed to load guilds from the server. Check your API configuration and try again.
-          </p>
-        </div>
-      )}
+      <GuildsListState
+        status={listState}
+        isEmpty={guilds.length === 0}
+        canWrite={canWrite}
+      />
 
-      {listState !== "unsupported" && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {guilds.map((guild) => {
-          const isPending = pendingIds.has(guild.id);
-          return (
-            <div key={guild.id} className={`bg-white border border-slate-200 rounded-xl p-6 transition-all ${isPending ? "opacity-50 scale-[0.98] pointer-events-none" : "hover:shadow-md"}`}>
-              <div className="flex justify-between items-start mb-2">
-                <h3 className="text-lg font-semibold text-slate-800">{guild.name}</h3>
-                {isPending && <span className="text-xs text-slate-400 animate-pulse">updating...</span>}
-              </div>
-              <p className="text-slate-600 mb-4">{guild.description}</p>
-              <div className="flex gap-4 text-sm mb-6">
-                <div>
-                  <span className="text-slate-500">Members:</span>
-                  <span className="font-semibold text-slate-800 ml-2">{guild.memberCount}</span>
+      {listState === "loaded" && guilds.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {guilds.map((guild) => {
+            const isPending = pendingIds.has(guild.id);
+            return (
+              <div key={guild.id} className={`bg-white border rounded-xl p-6 transition-all ${
+                guild.id === activeGuildId
+                  ? "border-violet-300 ring-2 ring-violet-100"
+                  : "border-slate-200"
+              } ${isPending ? "opacity-50 scale-[0.98] pointer-events-none" : "hover:shadow-md"}`}>
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-lg font-semibold text-slate-800">{guild.name}</h3>
+                  <div className="flex items-center gap-2">
+                    {guild.id === activeGuildId && (
+                      <span className="text-xs font-medium text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">
+                        Active
+                      </span>
+                    )}
+                    {isPending && <span className="text-xs text-slate-400 animate-pulse">updating...</span>}
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-500">Passes:</span>
-                  <span className="font-semibold text-slate-800 ml-2">{guild.passCount}</span>
+                <p className="text-slate-600 mb-4">{guild.description}</p>
+                <div className="flex gap-4 text-sm mb-6">
+                  <div>
+                    <span className="text-slate-500">Members:</span>
+                    <span className="font-semibold text-slate-800 ml-2">{guild.memberCount}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Passes:</span>
+                    <span className="font-semibold text-slate-800 ml-2">{guild.passCount}</span>
+                  </div>
                 </div>
-              </div>
 
-              {canWrite && (
                 <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
+                  <Link
+                    href={`/guilds/${guild.id}`}
+                    onClick={() => setGuildId(guild.id)}
+                    className="text-xs font-medium text-violet-600 hover:text-violet-800 transition-colors"
+                  >
+                    Open
+                  </Link>
+                  <span className="text-slate-300">·</span>
                   <button
-                    onClick={() => handleRename(guild.id, guild.name)}
+                    type="button"
+                    onClick={() => setGuildId(guild.id)}
                     className="text-xs font-medium text-slate-600 hover:text-violet-600 transition-colors"
                   >
-                    Rename
+                    {guild.id === activeGuildId ? "Selected" : "Switch to"}
                   </button>
-                  <span className="text-slate-300">Â·</span>
-                  <button
-                    onClick={() => handleDelete(guild.id)}
-                    className="text-xs font-medium text-red-500 hover:text-red-700 transition-colors"
-                  >
-                    Delete
-                  </button>
+                  {canWrite && (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <button
+                        onClick={() => handleRename(guild.id, guild.name)}
+                        className="text-xs font-medium text-slate-600 hover:text-violet-600 transition-colors"
+                      >
+                        Rename
+                      </button>
+                      <span className="text-slate-300">·</span>
+                      <button
+                        onClick={() => handleDelete(guild.id)}
+                        className="text-xs font-medium text-red-500 hover:text-red-700 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </DashboardLayout>
   );

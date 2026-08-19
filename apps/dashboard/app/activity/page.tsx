@@ -2,14 +2,21 @@
 
 import DashboardLayout from "@/components/DashboardLayout";
 import LastUpdated from "@/components/LastUpdated";
+import WalletAddressText from "@/components/WalletAddressText";
 import { getActivityRefreshConfig } from "@/lib/env";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
 import {
+  type ActivityEventEntity,
   type ActivityEventSeverity,
   type ActivityEventSource,
   type ActivityEventType,
 } from "@guildpass/integration-client";
-import { useMemo, useState } from "react";
+import type { ActivityChange } from "@guildpass/integration-client";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useGuild } from "@/lib/guild/GuildProvider";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { ActivitySortOrder } from "@/lib/activity/query";
 
 const TYPE_ICON: Record<ActivityEventType, string> = {
   "member.joined": "👤",
@@ -27,6 +34,7 @@ const TYPE_ICON: Record<ActivityEventType, string> = {
   "settings.updated": "⚙️",
   "verification.completed": "✅",
   "webhook.received": "📡",
+  "activity.permission_denied": "⛔",
 };
 
 const TYPE_COLOR: Record<ActivityEventType, string> = {
@@ -45,6 +53,7 @@ const TYPE_COLOR: Record<ActivityEventType, string> = {
   "settings.updated": "bg-slate-100",
   "verification.completed": "bg-emerald-100",
   "webhook.received": "bg-indigo-100",
+  "activity.permission_denied": "bg-red-100",
 };
 
 const TYPE_FILTERS: { label: string; value: ActivityEventType | "" }[] = [
@@ -55,6 +64,7 @@ const TYPE_FILTERS: { label: string; value: ActivityEventType | "" }[] = [
   { label: "Pass purchased", value: "pass.purchased" },
   { label: "Access granted", value: "access.granted" },
   { label: "Webhook received", value: "webhook.received" },
+  { label: "Permission denied", value: "activity.permission_denied" },
 ];
 
 const SOURCE_FILTERS: { label: string; value: ActivityEventSource | "" }[] = [
@@ -62,6 +72,7 @@ const SOURCE_FILTERS: { label: string; value: ActivityEventSource | "" }[] = [
   { label: "Dashboard", value: "dashboard" },
   { label: "Webhook", value: "webhook" },
   { label: "Core API", value: "core_api" },
+  { label: "Reconciliation", value: "reconciliation" },
 ];
 
 const SEVERITY_FILTERS: { label: string; value: ActivityEventSeverity | "" }[] = [
@@ -72,13 +83,111 @@ const SEVERITY_FILTERS: { label: string; value: ActivityEventSeverity | "" }[] =
   { label: "Critical", value: "critical" },
 ];
 
-export default function ActivityPage() {
-  const [type, setType] = useState<ActivityEventType | "">("");
-  const [source, setSource] = useState<ActivityEventSource | "">("");
-  const [severity, setSeverity] = useState<ActivityEventSeverity | "">("");
-  const [actor, setActor] = useState("");
-  const [from, setFrom] = useState("");
+const ENTITY_TYPE_FILTERS: { label: string; value: ActivityEventEntity["type"] | "" }[] = [
+  { label: "All entity types", value: "" },
+  { label: "Pass", value: "pass" },
+  { label: "Guild", value: "guild" },
+  { label: "Member", value: "member" },
+  { label: "Verification", value: "verification" },
+  { label: "Webhook", value: "webhook" },
+];
+
+const SORT_OPTIONS: { label: string; value: ActivitySortOrder }[] = [
+  { label: "Newest first", value: "newest" },
+  { label: "Oldest first", value: "oldest" },
+];
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+
+function readSort(value: string | null): ActivitySortOrder {
+  return value === "oldest" ? "oldest" : "newest";
+}
+
+function readLimit(value: string | null): number {
+  const parsed = Number(value);
+  return PAGE_SIZE_OPTIONS.includes(parsed as (typeof PAGE_SIZE_OPTIONS)[number]) ? parsed : 10;
+}
+function ActivityPageContent() {
+  const { guildId, guild } = useGuild();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [type, setType] = useState<ActivityEventType | "">(() => (searchParams.get("type") as ActivityEventType | null) ?? "");
+  const [source, setSource] = useState<ActivityEventSource | "">(() => (searchParams.get("source") as ActivityEventSource | null) ?? "");
+  const [severity, setSeverity] = useState<ActivityEventSeverity | "">(() => (searchParams.get("severity") as ActivityEventSeverity | null) ?? "");
+  const [entityType, setEntityType] = useState<ActivityEventEntity["type"] | "">(() => (searchParams.get("entityType") as ActivityEventEntity["type"] | null) ?? "");
+  const [actor, setActor] = useState(() => searchParams.get("actor") ?? "");
+  const [from, setFrom] = useState(() => searchParams.get("from") ?? "");
+  const [sort, setSort] = useState<ActivitySortOrder>(() => readSort(searchParams.get("sort")));
+  const [limit, setLimit] = useState(() => readLimit(searchParams.get("limit")));
   const { intervalMs } = getActivityRefreshConfig();
+  const updateActivityQuery = useCallback(
+    (updates: {
+      type?: ActivityEventType | "";
+      source?: ActivityEventSource | "";
+      severity?: ActivityEventSeverity | "";
+      entityType?: ActivityEventEntity["type"] | "";
+      actor?: string;
+      from?: string;
+      sort?: ActivitySortOrder;
+      limit?: number;
+    }) => {
+      const next = new URLSearchParams(searchParams.toString());
+      const setOrDelete = (key: string, value: string) => {
+        const trimmed = value.trim();
+        if (trimmed) {
+          next.set(key, trimmed);
+        } else {
+          next.delete(key);
+        }
+      };
+
+      if (updates.type !== undefined) setOrDelete("type", updates.type);
+      if (updates.source !== undefined) setOrDelete("source", updates.source);
+      if (updates.severity !== undefined) setOrDelete("severity", updates.severity);
+      if (updates.entityType !== undefined) setOrDelete("entityType", updates.entityType);
+      if (updates.actor !== undefined) setOrDelete("actor", updates.actor);
+      if (updates.from !== undefined) setOrDelete("from", updates.from);
+      if (updates.sort !== undefined) {
+        if (updates.sort === "newest") {
+          next.delete("sort");
+        } else {
+          next.set("sort", updates.sort);
+        }
+      }
+      if (updates.limit !== undefined) {
+        if (updates.limit === 10) {
+          next.delete("limit");
+        } else {
+          next.set("limit", String(updates.limit));
+        }
+      }
+
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  useEffect(() => {
+    const nextType = (searchParams.get("type") as ActivityEventType | null) ?? "";
+    const nextSource = (searchParams.get("source") as ActivityEventSource | null) ?? "";
+    const nextSeverity = (searchParams.get("severity") as ActivityEventSeverity | null) ?? "";
+    const nextEntityType = (searchParams.get("entityType") as ActivityEventEntity["type"] | null) ?? "";
+    const nextActor = searchParams.get("actor") ?? "";
+    const nextFrom = searchParams.get("from") ?? "";
+    const nextSort = readSort(searchParams.get("sort"));
+    const nextLimit = readLimit(searchParams.get("limit"));
+
+    if (nextType !== type) setType(nextType);
+    if (nextSource !== source) setSource(nextSource);
+    if (nextSeverity !== severity) setSeverity(nextSeverity);
+    if (nextEntityType !== entityType) setEntityType(nextEntityType);
+    if (nextActor !== actor) setActor(nextActor);
+    if (nextFrom !== from) setFrom(nextFrom);
+    if (nextSort !== sort) setSort(nextSort);
+    if (nextLimit !== limit) setLimit(nextLimit);
+  }, [actor, entityType, from, limit, searchParams, severity, sort, source, type]);
 
   const fromIso = useMemo(() => {
     if (!from) return undefined;
@@ -98,28 +207,38 @@ export default function ActivityPage() {
     loadMore,
     refresh,
   } = useActivityFeed({
-    limit: 10,
+    limit,
     type: type || undefined,
     source: source || undefined,
     severity: severity || undefined,
+    entityType: entityType || undefined,
     actor: actor.trim() || undefined,
     from: fromIso,
+    sort,
     autoRefresh: true,
     simulate: false,
+    guildId,
   });
 
-  const hasActiveFilters = Boolean(type || source || severity || actor.trim() || from);
+  const hasActiveFilters = Boolean(type || source || severity || entityType || actor.trim() || from || sort !== "newest" || limit !== 10);
 
   const clearFilters = () => {
     setType("");
     setSource("");
     setSeverity("");
+    setEntityType("");
     setActor("");
     setFrom("");
+    setSort("newest");
+    setLimit(10);
+    updateActivityQuery({ type: "", source: "", severity: "", entityType: "", actor: "", from: "", sort: "newest", limit: 10 });
   };
 
   return (
-    <DashboardLayout title="Activity">
+    <DashboardLayout
+      title="Activity"
+      subtitle={guild ? `Scoped to ${guild.name}` : undefined}
+    >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-slate-500">
@@ -153,12 +272,12 @@ export default function ActivityPage() {
       </div>
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-8">
           <label className="text-xs font-medium text-slate-600">
             Event type
             <select
               value={type}
-              onChange={(event) => setType(event.target.value as ActivityEventType | "")}
+              onChange={(event) => { const value = event.target.value as ActivityEventType | ""; setType(value); updateActivityQuery({ type: value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             >
               {TYPE_FILTERS.map((option) => (
@@ -173,7 +292,7 @@ export default function ActivityPage() {
             Source
             <select
               value={source}
-              onChange={(event) => setSource(event.target.value as ActivityEventSource | "")}
+              onChange={(event) => { const value = event.target.value as ActivityEventSource | ""; setSource(value); updateActivityQuery({ source: value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             >
               {SOURCE_FILTERS.map((option) => (
@@ -188,7 +307,7 @@ export default function ActivityPage() {
             Severity
             <select
               value={severity}
-              onChange={(event) => setSeverity(event.target.value as ActivityEventSeverity | "")}
+              onChange={(event) => { const value = event.target.value as ActivityEventSeverity | ""; setSeverity(value); updateActivityQuery({ severity: value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             >
               {SEVERITY_FILTERS.map((option) => (
@@ -200,10 +319,25 @@ export default function ActivityPage() {
           </label>
 
           <label className="text-xs font-medium text-slate-600">
+            Entity type
+            <select
+              value={entityType}
+              onChange={(event) => { const value = event.target.value as ActivityEventEntity["type"] | ""; setEntityType(value); updateActivityQuery({ entityType: value }); }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            >
+              {ENTITY_TYPE_FILTERS.map((option) => (
+                <option key={option.value || "all-entity-types"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-xs font-medium text-slate-600">
             Actor
             <input
               value={actor}
-              onChange={(event) => setActor(event.target.value)}
+              onChange={(event) => { setActor(event.target.value); updateActivityQuery({ actor: event.target.value }); }}
               placeholder="Name or wallet"
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             />
@@ -214,9 +348,46 @@ export default function ActivityPage() {
             <input
               type="datetime-local"
               value={from}
-              onChange={(event) => setFrom(event.target.value)}
+              onChange={(event) => { setFrom(event.target.value); updateActivityQuery({ from: event.target.value }); }}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
             />
+          </label>
+          <label className="text-xs font-medium text-slate-600">
+            Sort
+            <select
+              value={sort}
+              onChange={(event) => {
+                const value = event.target.value as ActivitySortOrder;
+                setSort(value);
+                updateActivityQuery({ sort: value });
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-xs font-medium text-slate-600">
+            Page size
+            <select
+              value={limit}
+              onChange={(event) => {
+                const value = readLimit(event.target.value);
+                setLimit(value);
+                updateActivityQuery({ limit: value });
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} per page
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
@@ -252,10 +423,13 @@ export default function ActivityPage() {
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate font-medium text-slate-800">{activity.description}</p>
                       <div className="flex shrink-0 items-center gap-2">
-                        <span className="text-xs text-slate-400">
-                          {new Date(activity.timestamp).toLocaleString()}
+                        <span
+                          className="text-xs text-slate-400"
+                          title={new Date(activity.timestamp).toLocaleString()}
+                        >
+                          {formatRelativeTime(activity.timestamp)}
                         </span>
-                        <span className={`rounded-full px-2 py-1 text-xs ${activity.source === "webhook" ? "bg-indigo-50 text-indigo-700" : "bg-slate-100 text-slate-700"}`}>
+                        <span className={`rounded-full px-2 py-1 text-xs ${activity.source === "webhook" ? "bg-indigo-50 text-indigo-700" : activity.source === "reconciliation" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-700"}`}>
                           {activity.source}
                         </span>
                         <span className={`rounded-full px-2 py-1 text-xs ${activity.severity === "error" || activity.severity === "critical" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
@@ -264,12 +438,24 @@ export default function ActivityPage() {
                       </div>
                     </div>
                     <p className="mt-0.5 text-sm text-slate-500">
-                      by {activity.actor.name || activity.actor.wallet || "System"}
+                      by {activity.actor.name || (activity.actor.wallet ? <WalletAddressText address={activity.actor.wallet} /> : "System")}
                     </p>
                     {activity.entity && (
                       <p className="mt-1 text-xs text-slate-400">
                         {activity.entity.type}: {activity.entity.name || activity.entity.id}
                       </p>
+                    )}
+                    {activity.changes && activity.changes.length > 0 && (
+                      <details className="mt-2 group">
+                        <summary className="text-xs font-medium text-primary-600 cursor-pointer hover:text-primary-700 select-none">
+                          {activity.changes.length} field{activity.changes.length !== 1 ? "s" : ""} changed
+                        </summary>
+                        <div className="mt-2 space-y-1.5 pl-2 border-l-2 border-primary-100">
+                          {activity.changes.map((change) => (
+                            <DiffRow key={change.field} change={change} />
+                          ))}
+                        </div>
+                      </details>
                     )}
                   </div>
                 </li>
@@ -292,5 +478,38 @@ export default function ActivityPage() {
         )}
       </div>
     </DashboardLayout>
+  );
+}
+
+/** Formats a diff value for display. Arrays are comma-joined; objects are JSON-summarized. */
+function formatDiffValue(value: unknown): string {
+  if (value === undefined || value === null) return "—";
+  if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "(empty)";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function DiffRow({ change }: { change: ActivityChange }) {
+  return (
+    <div className="text-xs">
+      <span className="font-semibold text-slate-700">{change.field}</span>
+      <div className="flex items-center gap-1.5 mt-0.5">
+        <span className="inline-block px-1.5 py-0.5 rounded bg-red-50 text-red-700 font-mono text-[11px] line-through">
+          {formatDiffValue(change.before)}
+        </span>
+        <span className="text-slate-300">→</span>
+        <span className="inline-block px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-mono text-[11px]">
+          {formatDiffValue(change.after)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function ActivityPage() {
+  return (
+    <Suspense fallback={<div>Loading activity...</div>}>
+      <ActivityPageContent />
+    </Suspense>
   );
 }

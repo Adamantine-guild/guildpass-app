@@ -10,8 +10,10 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsx --test test/**/*.test.ts",
-    "test:js": "node --test test/**/*.test.js"
+    "test": "npm run build -w @guildpass/env && node --import tsx --experimental-test-module-mocks --test test/**/*.test.ts",
+    "test:js": "node --test test/**/*.test.js",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts"
   },
   "repository": {
     "type": "git",
@@ -26,12 +28,17 @@
     "next": "14.2.21",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "viem": "^2.13.0",
+    "pg": "^8.13.1",
     "@guildpass/integration-client": "workspace:*",
-    "@guildpass/webhook-utils": "workspace:*"
+    "@guildpass/webhook-utils": "workspace:*",
+    "@guildpass/metrics": "workspace:*",
+    "@guildpass/env": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.2",
     "@types/node": "^20.17.6",
+    "@types/pg": "^8.11.11",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "typescript": "^5.6.3",

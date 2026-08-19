@@ -7,6 +7,14 @@
  * server-side if added later (see issue #80 notes).
  */
 
+export const SECRET_MASK = "••••••••";
+
+export interface WriteOnlySecret {
+  readonly isSet: boolean;
+  readonly maskedValue: typeof SECRET_MASK;
+  readonly __secretBrand?: never;
+}
+
 export interface DashboardSettings {
   /** Display name of the workspace. */
   workspaceName: string;
@@ -16,6 +24,12 @@ export interface DashboardSettings {
   displayName: string;
   /** Contact email for the workspace profile. */
   email: string;
+  /**
+   * Write-only secret, never readable in plaintext. Present on reads only as
+   * a set/unset flag with a masked value; writes go through the settings
+   * patch flow and are stored encrypted (see DurableSettingsRepository).
+   */
+  webhookForwardingSecret?: WriteOnlySecret;
 }
 
 /**

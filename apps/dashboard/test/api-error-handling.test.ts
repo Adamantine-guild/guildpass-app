@@ -85,7 +85,7 @@ describe("handleApiError — internal error leakage", () => {
 
   test("a PermissionDeniedError is treated as a client-safe 403", async () => {
     const response = await handleApiError(async () => {
-      throw new PermissionDeniedError("members:write");
+      throw new PermissionDeniedError("members:write", "1");
     });
     const body = await response.json();
 
@@ -103,5 +103,39 @@ describe("handleApiError — internal error leakage", () => {
 
     assert.equal(response.status, 201);
     assert.deepEqual(body, { ok: true });
+  });
+
+  test("validateLiveModeEnv throws a PublicApiError listing missing variables", async () => {
+    const { validateLiveModeEnv } = await import("../lib/env");
+
+    const origMode = process.env.DASHBOARD_API_MODE;
+    const origUrl = process.env.GUILD_PASS_CORE_URL;
+    const origKey = process.env.GUILD_PASS_CORE_API_KEY;
+    const origSecret = process.env.WEBHOOK_SECRET;
+
+    try {
+      process.env.DASHBOARD_API_MODE = "live";
+      delete process.env.GUILD_PASS_CORE_URL;
+      delete process.env.GUILD_PASS_CORE_API_KEY;
+      delete process.env.WEBHOOK_SECRET;
+
+      const response = await handleApiError(async () => {
+        validateLiveModeEnv();
+        return Response.json({ ok: true });
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 500);
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "SERVER_ERROR");
+      assert.ok(body.error.includes("GUILD_PASS_CORE_URL"));
+      assert.ok(body.error.includes("GUILD_PASS_CORE_API_KEY"));
+      assert.ok(body.error.includes("WEBHOOK_SECRET"));
+    } finally {
+      process.env.DASHBOARD_API_MODE = origMode;
+      if (origUrl !== undefined) process.env.GUILD_PASS_CORE_URL = origUrl; else delete process.env.GUILD_PASS_CORE_URL;
+      if (origKey !== undefined) process.env.GUILD_PASS_CORE_API_KEY = origKey; else delete process.env.GUILD_PASS_CORE_API_KEY;
+      if (origSecret !== undefined) process.env.WEBHOOK_SECRET = origSecret; else delete process.env.WEBHOOK_SECRET;
+    }
   });
 });

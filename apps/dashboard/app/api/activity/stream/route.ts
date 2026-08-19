@@ -1,13 +1,9 @@
-import { apiError } from "@/lib/api-helpers";
-import {
-  requireDashboardSession,
-  UnauthorizedError,
-} from "@/lib/auth/server-session";
 import {
   encodeActivityEvent,
   subscribeToActivityEvents,
 } from "@/lib/activity/stream";
-import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
+import { requireSessionAndPermission } from "@/lib/auth/require-permission";
+import { getActiveGuildId } from "@/lib/guild-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,18 +15,8 @@ const READY_FRAME = "event: ready\ndata: {}\n\n";
 const encoder = new TextEncoder();
 
 export async function GET(request: Request): Promise<Response> {
-  try {
-    const session = requireDashboardSession(request);
-    assertPermission(session, "activity:read");
-  } catch (error) {
-    if (error instanceof PermissionDeniedError) {
-      return apiError(error.message, 403);
-    }
-    if (error instanceof UnauthorizedError) {
-      return apiError(error.message, 401);
-    }
-    throw error;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "activity:read");
+  if (!guard.ok) return guard.response;
 
   let dispose = () => {};
   const stream = new ReadableStream<Uint8Array>({

@@ -1,31 +1,50 @@
 import { z } from "zod";
 import type { WebhookPayload } from "./types";
 import { SUPPORTED_WEBHOOK_EVENTS } from "./types";
+import { isValidChecksumAddress, normaliseAddress } from "../address";
 
 export type ValidationResult =
-| { valid: true; payload: WebhookPayload }
-| { valid: false; error: string; field?: string };
+  | { valid: true; payload: WebhookPayload }
+  | { valid: false; error: string; field?: string };
 
-// 1. Define specific data schemas
-const DataSchemas = {
-"membership.created": z.object({ name: z.string().optional(), wallet: z.string().optional(), id: z.string().optional() }),
-  "membership.updated": z.object({ name: z.string().optional(), wallet: z.string().optional(), id: z.string().optional() }),
-  "pass.created": z.object({ name: z.string().optional(), id: z.string().optional() }),
-  "pass.updated": z.object({ name: z.string().optional(), id: z.string().optional() }),
-  "guild.updated": z.object({ name: z.string().optional(), id: z.string().optional() }),
-  "verification.completed": z.object({ wallet: z.string().optional(), id: z.string().optional() }),
-};
-
-// 2. Base envelope schema
-const EnvelopeSchema = z.object({
-  id: z.string().min(1),
-  type: z.string().min(1),
-  created: z.number().positive(),
+const webhookPayloadSchema = z.object({
+  id: z.string().min(1, { message: "id is required" }),
+  type: z.string().min(1, { message: "type is required" }),
+  created: z.number().positive({ message: "created must be a positive number" }),
   data: z.record(z.string(), z.unknown()),
 });
 
+export const DataSchemas = {
+  "membership.created": z.object({
+    name: z.string().optional(),
+    wallet: z.string().optional(),
+    id: z.string().optional(),
+  }),
+  "membership.updated": z.object({
+    name: z.string().optional(),
+    wallet: z.string().optional(),
+    id: z.string().optional(),
+  }),
+  "pass.created": z.object({
+    name: z.string().optional(),
+    id: z.string().optional(),
+  }),
+  "pass.updated": z.object({
+    name: z.string().optional(),
+    id: z.string().optional(),
+  }),
+  "guild.updated": z.object({
+    name: z.string().optional(),
+    id: z.string().optional(),
+  }),
+  "verification.completed": z.object({
+    wallet: z.string().optional(),
+    id: z.string().optional(),
+  }),
+} as const;
+
+
 export function validateWebhookPayload(rawBody: string): ValidationResult {
-  // Parse JSON
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawBody);
@@ -33,36 +52,46 @@ export function validateWebhookPayload(rawBody: string): ValidationResult {
     return { valid: false, error: "Invalid JSON", field: "body" };
   }
 
-  // Validate Envelope
-  const envelopeResult = EnvelopeSchema.safeParse(parsed);
+  const envelopeResult = webhookPayloadSchema.safeParse(parsed);
   if (!envelopeResult.success) {
-    const error = envelopeResult.error.issues[0];
-    const field = error.path.join(".") || "body";
+    const issue = envelopeResult.error.issues[0];
+    const field = issue.path.join(".") || "body";
     return {
       valid: false,
-      error: `${field}: ${error.message}`,
+      error: `${field}: ${issue.message}`,
       field,
     };
   }
 
   const payload = envelopeResult.data;
 
-  // Validate Event-specific data
-  // Only validate if it's a known supported event
-  if ((SUPPORTED_WEBHOOK_EVENTS as readonly string[]).includes(payload.type)) {
+  if (SUPPORTED_WEBHOOK_EVENTS.includes(payload.type as typeof SUPPORTED_WEBHOOK_EVENTS[number])) {
     const schema = DataSchemas[payload.type as keyof typeof DataSchemas];
     const dataResult = schema.safeParse(payload.data);
 
     if (!dataResult.success) {
-      const error = dataResult.error.issues[0];
-      const field = `data.${error.path.join(".")}`.replace(/\.$/, "");
+      const issue = dataResult.error.issues[0];
+      const field = `data.${issue.path.join(".")}`.replace(/\.$/, "");
       return {
         valid: false,
-        error: `${field}: ${error.message}`,
+        error: `${field}: ${issue.message}`,
         field,
       };
+    }
+    // Additional semantic validation: ensure wallets are checksummed and normalise them
+    const parsedData = dataResult.data as Record<string, unknown>;
+    const walletField = parsedData.wallet as string | undefined;
+    if (walletField) {
+      if (!isValidChecksumAddress(walletField)) {
+        return { valid: false, error: `data.wallet: wallet must be a checksummed Ethereum address`, field: "data.wallet" };
+      }
+      // replace with normalised checksummed form
+      parsedData.wallet = normaliseAddress(walletField);
+      payload.data = parsedData as any;
     }
   }
 
   return { valid: true, payload };
 }
+
+export { webhookPayloadSchema };

@@ -86,6 +86,26 @@ describe("activity query contract", () => {
     assert.equal(result.nextCursor, null);
   });
 
+  test("sorts oldest first when requested", () => {
+    const result = filterActivityEvents(events, { limit: 3, sort: "oldest" });
+
+    assert.deepEqual(
+      result.events.map((event) => event.id),
+      ["evt_query_001", "evt_query_002", "evt_query_003"]
+    );
+    assert.equal(result.nextCursor, "evt_query_003");
+  });
+
+  test("filters by entityType alone", () => {
+    const result = filterActivityEvents(events, { entityType: "verification", limit: 10 });
+
+    assert.deepEqual(
+      result.events.map((event) => event.id),
+      ["evt_query_003"]
+    );
+    assert.equal(result.nextCursor, null);
+  });
+
   test("returns an empty page for valid filters with no matches", () => {
     const result = filterActivityEvents(events, {
       type: "guild.deleted",
@@ -99,7 +119,7 @@ describe("activity query contract", () => {
 
   test("parses and bounds valid URL query parameters", () => {
     const parsed = parseActivityQuery(
-      new URL("https://example.test/api/activity?limit=250&type=member.joined&source=webhook&severity=error&entityType=member&actor=alice&from=2025-01-01T00:00:00.000Z")
+      new URL("https://example.test/api/activity?limit=250&type=member.joined&source=webhook&severity=error&entityType=member&actor=alice&from=2025-01-01T00:00:00.000Z&sort=oldest")
         .searchParams
     );
 
@@ -113,11 +133,12 @@ describe("activity query contract", () => {
     assert.equal(parsed.value.entityType, "member");
     assert.equal(parsed.value.actor, "alice");
     assert.equal(parsed.value.from, "2025-01-01T00:00:00.000Z");
+    assert.equal(parsed.value.sort, "oldest");
   });
 
   test("rejects invalid query parameters with field-specific errors", () => {
     const parsed = parseActivityQuery(
-      new URL("https://example.test/api/activity?limit=abc&type=not-real&from=tomorrow")
+      new URL("https://example.test/api/activity?limit=abc&type=not-real&from=tomorrow&sort=sideways")
         .searchParams
     );
 
@@ -126,7 +147,21 @@ describe("activity query contract", () => {
 
     assert.deepEqual(
       parsed.errors.map((error) => error.field),
-      ["limit", "type", "from"]
+      ["limit", "type", "sort", "from"]
+    );
+  });
+
+  test("rejects an invalid entityType parameter", () => {
+    const parsed = parseActivityQuery(
+      new URL("https://example.test/api/activity?entityType=not-real").searchParams
+    );
+
+    assert.equal(parsed.ok, false);
+    if (parsed.ok) return;
+
+    assert.deepEqual(
+      parsed.errors.map((error) => error.field),
+      ["entityType"]
     );
   });
 });

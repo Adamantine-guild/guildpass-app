@@ -75,32 +75,50 @@ describe("activity SSE delivery", () => {
     assert.equal(getActivitySubscriberCount(), initialSubscribers);
   });
 
-  test("client connector accepts activity and falls back exactly once on stream error", () => {
-    const source = new FakeEventSource();
+  test("client connector accepts activity and reconnects with backoff on stream error", async () => {
+    const sources: FakeEventSource[] = [];
     const received: string[] = [];
     let fallbackCount = 0;
+    let readyCount = 0;
     const event = makeActivityEvent({ id: "evt_client_stream_001" });
 
     const disconnect = connectActivityStream({
-      createEventSource: () => source,
+      createEventSource: (url) => {
+        const source = new FakeEventSource();
+        sources.push(source);
+        if (sources.length === 2) {
+          assert.match(url, /lastEventId=evt_client_stream_001/);
+        }
+        return source;
+      },
       onEvent: (activity) => received.push(activity.id),
       onFallback: () => {
         fallbackCount += 1;
       },
+      onReady: () => {
+        readyCount += 1;
+      },
+      reconnectBaseDelayMs: 10,
+      reconnectJitterRatio: 0,
+      reconnectMaxDelayMs: 10,
     });
 
-    source.emit("ready", "{}");
-    source.emit("activity", JSON.stringify(event));
-    source.emit("activity", "not-json");
-    source.emit("error");
-    source.emit("error");
+    sources[0].emit("ready", "{}");
+    sources[0].emit("activity", JSON.stringify(event));
+    sources[0].emit("activity", "not-json");
+    sources[0].emit("error");
+    sources[0].emit("error");
+
+    await delay(30);
+    sources[1].emit("ready", "{}");
 
     assert.deepEqual(received, [event.id]);
-    assert.equal(fallbackCount, 1);
-    assert.equal(source.closeCount, 1);
+    assert.equal(fallbackCount, 0);
+    assert.equal(readyCount, 2);
+    assert.equal(sources[0].closeCount, 1);
 
     disconnect();
-    assert.equal(source.closeCount, 1);
+    assert.equal(sources[1].closeCount, 1);
   });
 
   test("ready handshake reconciles the REST snapshot after subscription", () => {
@@ -146,24 +164,32 @@ describe("activity SSE delivery", () => {
     assert.equal(source.closeCount, 1);
   });
 
-  test("client falls back when a ready stream stops sending heartbeats", async () => {
-    const source = new FakeEventSource();
+  test("client reconnects when a ready stream stops sending heartbeats", async () => {
+    const sources: FakeEventSource[] = [];
     let fallbackCount = 0;
 
     connectActivityStream({
       connectionTimeoutMs: 100,
-      createEventSource: () => source,
+      createEventSource: () => {
+        const source = new FakeEventSource();
+        sources.push(source);
+        return source;
+      },
       heartbeatTimeoutMs: 10,
       onEvent: () => {},
       onFallback: () => {
         fallbackCount += 1;
       },
+      reconnectBaseDelayMs: 10,
+      reconnectJitterRatio: 0,
+      reconnectMaxDelayMs: 10,
     });
 
-    source.emit("ready", "{}");
+    sources[0].emit("ready", "{}");
     await delay(30);
-    assert.equal(fallbackCount, 1);
-    assert.equal(source.closeCount, 1);
+    assert.equal(fallbackCount, 0);
+    assert.equal(sources[0].closeCount, 1);
+    assert.equal(sources.length, 2);
   });
 
   test("server disconnects a stream whose bounded output queue fills", async () => {

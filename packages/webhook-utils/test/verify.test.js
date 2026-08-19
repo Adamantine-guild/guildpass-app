@@ -1,5 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert";
+import { Buffer } from "node:buffer";
+import { URL } from "node:url";
+import { readFileSync } from "node:fs";
 import { verifySignature, generateSignature } from "../dist/index.js";
 
 describe("verifySignature", () => {
@@ -167,7 +170,6 @@ describe("verifySignature", () => {
         payload: PAYLOAD,
         timestamp: futureTimestamp,
       });
-
       const result = verifySignature({
         signatureHeader: signature,
         secret: SECRET,
@@ -178,6 +180,26 @@ describe("verifySignature", () => {
       assert.strictEqual(result.valid, false);
       assert.ok(result.error.includes("future"));
     });
+
+    test("should accept future timestamp within tolerance", () => {
+      const futureTimestamp = Math.floor(Date.now() / 1000) + 120;
+      const { signature } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+        timestamp: futureTimestamp,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.timestamp, futureTimestamp);
+    });
+      
 
     test("should accept timestamp within tolerance", () => {
       const recentTimestamp = Math.floor(Date.now() / 1000) - 200; // 200 seconds ago
@@ -242,6 +264,84 @@ describe("verifySignature", () => {
 
       assert.strictEqual(result.valid, false);
       assert.ok(result.error.includes("timestamp"));
+    });
+
+    test("should reject empty v1 signature value", () => {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const result = verifySignature({
+        signatureHeader: `t=${timestamp},v1=`,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error.includes("signature"));
+    });
+
+    test("should accept valid header when segments are reordered and extra metadata is present", () => {
+      const { signature, timestamp } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+      const [, v1] = signature.split(",");
+
+      const result = verifySignature({
+        signatureHeader: `ignored=metadata,${v1},t=${timestamp}`,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, true);
+      assert.strictEqual(result.timestamp, timestamp);
+    });
+
+    test("should reject same-length wrong signature", () => {
+      const { signature, timestamp } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+      const [, v1] = signature.split(",");
+      const sameLengthWrongSignature = `${v1.slice(0, -2)}aa`;
+
+      const result = verifySignature({
+        signatureHeader: `t=${timestamp},${sameLengthWrongSignature}`,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.error, "Invalid signature");
+    });
+  
+    test("should reject header containing only whitespace", () => {
+      const result = verifySignature({
+        signatureHeader: "   ",
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.strictEqual(result.error, "Invalid or missing timestamp in signature");
+    });
+
+    test("should reject header with trailing or leading malformed commas", () => {
+      const result = verifySignature({
+        signatureHeader: ",,,",
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should reject header with float/decimal timestamp", () => {
+      const result = verifySignature({
+        signatureHeader: "t=12345.678,v1=abc123",
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
     });
   });
 
@@ -360,6 +460,94 @@ describe("verifySignature", () => {
       });
 
       assert.strictEqual(result.valid, false);
+    });
+  });
+  describe("Timing-safe comparison smoke test", () => {
+    test("should use Node timingSafeEqual for same-length signature comparison", () => {
+      const source = readFileSync(new URL("../src/verify.ts", import.meta.url), "utf8");
+
+      assert.match(source, /timingSafeEqual/);
+      assert.match(source, /signatureBuffer\.length !== expectedBuffer\.length/);
+    });
+  });
+
+  describe("Additional edge cases", () => {
+    test("should reject header with duplicate v1 values where the trailing value is bogus", () => {
+      const { signature } = generateSignature({ secret: SECRET, payload: PAYLOAD });
+      const [tPart, v1Part] = signature.split(",");
+      const bogusV1 = `v1=${"a".repeat(64)}`;
+      const headerWithDuplicateV1 = `${tPart},${v1Part},${bogusV1}`;
+
+      const result = verifySignature({
+        signatureHeader: headerWithDuplicateV1,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should reject header with timestamp present but signature value made only of whitespace", () => {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const result = verifySignature({
+        signatureHeader: `t=${timestamp},v1=   `,
+        secret: SECRET,
+        payload: PAYLOAD,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should reject signature verified against a semantically equal but differently serialized payload", () => {
+      const orderedPayload = JSON.stringify({ event: "member.joined", memberId: "123" });
+      const reorderedPayload = JSON.stringify({ memberId: "123", event: "member.joined" });
+
+      const { signature } = generateSignature({ secret: SECRET, payload: orderedPayload });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: reorderedPayload,
+      });
+
+      assert.strictEqual(result.valid, false);
+    });
+
+    test("should accept timestamp exactly at the tolerance boundary", () => {
+      const boundaryTimestamp = Math.floor(Date.now() / 1000) - 300;
+      const { signature } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+        timestamp: boundaryTimestamp,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, true);
+    });
+
+    test("should reject timestamp exactly one second outside the tolerance boundary", () => {
+      const justOutsideTimestamp = Math.floor(Date.now() / 1000) - 301;
+      const { signature } = generateSignature({
+        secret: SECRET,
+        payload: PAYLOAD,
+        timestamp: justOutsideTimestamp,
+      });
+
+      const result = verifySignature({
+        signatureHeader: signature,
+        secret: SECRET,
+        payload: PAYLOAD,
+        tolerance: 300,
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.error.includes("too old"));
     });
   });
 });

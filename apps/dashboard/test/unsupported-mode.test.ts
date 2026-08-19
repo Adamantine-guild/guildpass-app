@@ -25,13 +25,15 @@ test("GET /api/passes returns paginated mock data in mock mode", async () => {
 
   try {
     const { GET } = await import("../app/api/passes/route.js");
-    const { mockPasses } = await import("../lib/mock-data.js");
+    const { mockPasses, DEFAULT_GUILD_ID } = await import("../lib/mock-data.js");
     const res: Response = await GET(new Request("http://localhost/api/passes"));
     const body = await res.json();
 
     assert.strictEqual(body.ok, true);
     assert.ok(Array.isArray(body.data.items), "response should include items");
-    assert.strictEqual(body.data.total, mockPasses.length);
+    // Listing is tenant-scoped: only the active guild's passes are returned.
+    const expected = mockPasses.filter((p) => p.guildId === DEFAULT_GUILD_ID).length;
+    assert.strictEqual(body.data.total, expected);
   } finally {
     restoreEnv("DASHBOARD_API_MODE", previousMode);
   }
@@ -129,13 +131,15 @@ test("GET /api/members returns paginated mock data in mock mode", async () => {
 
   try {
     const { GET } = await import("../app/api/members/route.js");
-    const { mockMembers } = await import("../lib/mock-data.js");
+    const { mockMembers, DEFAULT_GUILD_ID } = await import("../lib/mock-data.js");
     const res: Response = await GET(new Request("http://localhost/api/members"));
     const body = await res.json();
 
     assert.strictEqual(body.ok, true);
     assert.ok(Array.isArray(body.data.items), "response should include items");
-    assert.strictEqual(body.data.total, mockMembers.length);
+    // Listing is tenant-scoped: only the active guild's members are returned.
+    const expected = mockMembers.filter((m) => m.guildId === DEFAULT_GUILD_ID).length;
+    assert.strictEqual(body.data.total, expected);
   } finally {
     restoreEnv("DASHBOARD_API_MODE", previousMode);
   }

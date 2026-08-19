@@ -24,12 +24,14 @@ const EVENT_TYPES = new Set<ActivityEventType>([
   "access.revoked",
   "verification.completed",
   "webhook.received",
+  "activity.permission_denied",
 ]);
 
 const EVENT_SOURCES = new Set<ActivityEventSource>([
   "dashboard",
   "webhook",
   "core_api",
+  "reconciliation",
 ]);
 
 const EVENT_SEVERITIES = new Set<ActivityEventSeverity>([
@@ -47,6 +49,10 @@ const ENTITY_TYPES = new Set<ActivityEventEntity["type"]>([
   "webhook",
 ]);
 
+const SORT_ORDERS = new Set<ActivitySortOrder>(["newest", "oldest"]);
+
+export type ActivitySortOrder = "newest" | "oldest";
+
 export interface ActivityQuery {
   limit?: number;
   cursor?: string;
@@ -56,6 +62,7 @@ export interface ActivityQuery {
   entityType?: ActivityEventEntity["type"];
   actor?: string;
   from?: string;
+  sort?: ActivitySortOrder;
 }
 
 export interface ActivityQueryResult {
@@ -91,7 +98,7 @@ export function filterActivityEvents(
       if (actorFilter && !matchesActor(event, actorFilter)) return false;
       return true;
     })
-    .sort(compareActivityEvents);
+    .sort((a, b) => compareActivityEvents(a, b, query.sort ?? "newest"));
 
   const cursorIndex = query.cursor
     ? filtered.findIndex((event) => event.id === query.cursor)
@@ -148,6 +155,10 @@ export function parseActivityQuery(
     query.actor = actor.toLowerCase();
   }
 
+  readEnum(searchParams, "sort", SORT_ORDERS, errors, (value) => {
+    query.sort = value;
+  });
+
   const from = searchParams.get("from");
   if (from) {
     const timestamp = new Date(from).getTime();
@@ -183,10 +194,11 @@ function clampLimit(limit: number): number {
   return Math.min(Math.max(limit, 1), MAX_ACTIVITY_LIMIT);
 }
 
-function compareActivityEvents(a: ActivityEvent, b: ActivityEvent): number {
-  const timeDiff = new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+function compareActivityEvents(a: ActivityEvent, b: ActivityEvent, sort: ActivitySortOrder = "newest"): number {
+  const newestFirst = new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  const timeDiff = sort === "oldest" ? -newestFirst : newestFirst;
   if (timeDiff !== 0) return timeDiff;
-  return b.id.localeCompare(a.id);
+  return sort === "oldest" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
 }
 
 function matchesActor(event: ActivityEvent, actorFilter: string): boolean {

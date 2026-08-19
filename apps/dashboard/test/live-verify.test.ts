@@ -1,13 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import http from "node:http";
+import { privateKeyToAccount } from "viem/accounts";
+
+// Hardhat/Anvil dev account #0 (public test key)
+const TEST_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const TEST_WALLET = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 test("POST /api/verify forwards to core API in live mode", async () => {
   const previousMode = process.env.DASHBOARD_API_MODE;
   const previousCoreUrl = process.env.GUILD_PASS_CORE_URL;
+  const previousApiKey = process.env.GUILD_PASS_CORE_API_KEY;
+  const previousWebhookSecret = process.env.WEBHOOK_SECRET;
   process.env.DASHBOARD_API_MODE = "live";
+  process.env.GUILD_PASS_CORE_API_KEY = "test-core-api-key";
+  process.env.WEBHOOK_SECRET = "test-webhook-secret";
 
-  // Note: this test requires a mock HTTP server; see live-verify-mockclient for injected version
+  let coreBody: any = null;
   const server = http.createServer((req, res) => {
     if (!req.url) return res.end();
     const url = new URL(req.url, `http://localhost`);
@@ -17,6 +26,7 @@ test("POST /api/verify forwards to core API in live mode", async () => {
       req.on("data", (chunk) => (body += chunk));
       req.on("end", () => {
         const parsed = JSON.parse(body || "{}");
+        coreBody = parsed;
         const result = {
           userId: parsed.discordUserId,
           wallet: parsed.wallet,
@@ -41,23 +51,45 @@ test("POST /api/verify forwards to core API in live mode", async () => {
   process.env.GUILD_PASS_CORE_URL = `http://127.0.0.1:${port}`;
 
   try {
+    const { resetVerificationChallengeStore } = await import("../lib/verification-challenge.js");
+    resetVerificationChallengeStore();
+
+    // 1. Request a challenge for the pair
+    const { POST: challengePOST } = await import("../app/api/verify/challenge/route.js");
+    const challengeRes = await challengePOST(
+      new Request("http://localhost/api/verify/challenge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ discordUserId: "u_live", wallet: TEST_WALLET }),
+      }) as any,
+    );
+    const challengeBody = await challengeRes.json();
+    assert.strictEqual(challengeBody.ok, true);
+    const { nonce, message } = challengeBody.data;
+
+    // 2. Sign the challenge with the claimed wallet
+    const account = privateKeyToAccount(TEST_KEY);
+    const signature = await account.signMessage({ message });
+
+    // 3. Submit proof
     const { POST } = await import("../app/api/verify/route.js");
-
-    const payload = { discordUserId: "u_live", wallet: "0xfeed" };
-    const req = new Request("http://localhost/api/verify", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const res = await POST(req as any);
+    const res = await POST(
+      new Request("http://localhost/api/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ discordUserId: "u_live", wallet: TEST_WALLET, nonce, signature }),
+      }) as any,
+    );
     const body = await res.json();
 
     assert.strictEqual(body.ok, true);
     const data = body.data;
-    assert.strictEqual(data.userId, payload.discordUserId);
-    assert.strictEqual(data.wallet, payload.wallet);
+    assert.strictEqual(data.userId, "u_live");
+    assert.strictEqual(data.wallet, TEST_WALLET);
     assert.strictEqual(data.verified, true);
+
+    // core received the proof of control alongside the lookup
+    assert.deepStrictEqual(coreBody.proof, { nonce, signature });
   } finally {
     if (server.listening) {
       server.close();
@@ -73,6 +105,18 @@ test("POST /api/verify forwards to core API in live mode", async () => {
       delete process.env.GUILD_PASS_CORE_URL;
     } else {
       process.env.GUILD_PASS_CORE_URL = previousCoreUrl;
+    }
+
+    if (previousApiKey === undefined) {
+      delete process.env.GUILD_PASS_CORE_API_KEY;
+    } else {
+      process.env.GUILD_PASS_CORE_API_KEY = previousApiKey;
+    }
+
+    if (previousWebhookSecret === undefined) {
+      delete process.env.WEBHOOK_SECRET;
+    } else {
+      process.env.WEBHOOK_SECRET = previousWebhookSecret;
     }
   }
 });

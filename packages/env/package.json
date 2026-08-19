@@ -1,0 +1,43 @@
+{
+  "name": "@guildpass/env",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared environment validation schemas for GuildPass apps",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js",
+      "require": "./dist/cli/index.cjs"
+    }
+  },
+  "bin": {
+    "guildpass-env-check": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "@types/node": "^20.17.6",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "license": "MIT"
+}

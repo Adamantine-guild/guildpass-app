@@ -8,6 +8,13 @@ import type { ActivityEvent } from "@/lib/activity/types";
 import type { DashboardSettings } from "../settings";
 import type { PaginatedResponse } from "../api-contracts";
 
+/**
+ * Input type for appending an activity event.
+ * `schemaVersion` defaults to the current version when omitted.
+ */
+export type ActivityEventInput = Omit<ActivityEvent, "id" | "timestamp" | "schemaVersion"> &
+  Partial<Pick<ActivityEvent, "schemaVersion">>;
+
 export interface PaginationOptions {
   limit?: number;
   cursor?: string | null;
@@ -25,41 +32,86 @@ export interface MemberListQuery extends PaginationOptions {
   search?: string;
   status?: Member["status"] | "all";
   role?: string | "all";
+  /** Inclusive lower bound on `joinedAt`, as a `YYYY-MM-DD` date or ISO timestamp. */
+  joinedFrom?: string;
+  /** Inclusive upper bound on `joinedAt`, as a `YYYY-MM-DD` date or ISO timestamp. */
+  joinedTo?: string;
 }
 
 /**
+ * Create input for a pass. `guildId` is intentionally excluded: the owning
+ * guild comes only from the explicit `guildId` scope parameter, so a payload
+ * can never assign a record to a different tenant. Adapters fill defaults for
+ * omitted fields (`status` defaults to "draft", `currentSupply` to 0).
+ */
+export type PassCreateData = Omit<Pass, "id" | "createdAt" | "guildId" | "status" | "currentSupply"> & {
+  status?: Pass["status"];
+  currentSupply?: number;
+};
+
+/**
+ * Update input for a pass. `id` and `guildId` are excluded so a patch can
+ * never re-identify a record or move it to another tenant.
+ */
+export type PassUpdateData = Partial<Omit<Pass, "id" | "guildId">>;
+
+/** Create input for a member. See {@link PassCreateData} for the rationale.
+ * `version` is excluded — the server always initializes it to 1. Adapters
+ * fill defaults for omitted fields (`status` defaults to "pending", `roles`
+ * to [], `joinedAt`/`lastActive` to the creation time). */
+export type MemberCreateData = Omit<Member, "id" | "guildId" | "version" | "status" | "roles" | "joinedAt" | "lastActive"> & {
+  status?: Member["status"];
+  roles?: string[];
+  joinedAt?: string;
+  lastActive?: string;
+};
+
+/** Update input for a member. See {@link PassUpdateData} for the rationale. */
+export type MemberUpdateData = Partial<Omit<Member, "id" | "guildId">>;
+
+/**
  * Repository for managing passes.
+ *
+ * Multi-tenant isolation guarantee: every method requires an explicit
+ * `guildId` scope as its first parameter — omitting it is a compile error,
+ * not a runtime possibility. Implementations MUST guarantee that a call
+ * scoped to guild A can never read, modify, or delete guild B's data, even
+ * when given an ID that exists in another guild (such calls behave exactly
+ * as if the record does not exist). See docs/multi-tenancy.md.
  */
 export interface IPassRepository {
   /**
-   * Get all passes.
+   * Get all passes belonging to the given guild.
    */
-  getAll(): Promise<Pass[]>;
+  getAll(guildId: string): Promise<Pass[]>;
 
   /**
-   * Query passes with filtering and bounded pagination.
+   * Query the guild's passes with filtering and bounded pagination.
    */
-  query(options?: PassListQuery): Promise<PaginatedResult<Pass>>;
+  query(guildId: string, options?: PassListQuery): Promise<PaginatedResult<Pass>>;
 
   /**
-   * Get a pass by ID.
+   * Get a pass by ID. Returns null when the pass does not exist
+   * or belongs to a different guild.
    */
-  getById(id: string): Promise<Pass | null>;
+  getById(guildId: string, id: string): Promise<Pass | null>;
 
   /**
-   * Create a new pass.
+   * Create a new pass owned by the given guild.
    */
-  create(pass: Omit<Pass, "id" | "createdAt">): Promise<Pass>;
+  create(guildId: string, pass: PassCreateData): Promise<Pass>;
 
   /**
-   * Update an existing pass.
+   * Update an existing pass. Returns null when the pass does not exist
+   * or belongs to a different guild. The owning guild can never change.
    */
-  update(id: string, pass: Partial<Pass>): Promise<Pass | null>;
+  update(guildId: string, id: string, pass: PassUpdateData): Promise<Pass | null>;
 
   /**
-   * Delete a pass.
+   * Delete a pass. Returns false when the pass does not exist
+   * or belongs to a different guild.
    */
-  delete(id: string): Promise<boolean>;
+  delete(guildId: string, id: string): Promise<boolean>;
 }
 
 /**
@@ -94,58 +146,96 @@ export interface IGuildRepository {
 
 /**
  * Repository for managing members.
+ *
+ * Multi-tenant isolation guarantee: every method requires an explicit
+ * `guildId` scope as its first parameter — omitting it is a compile error,
+ * not a runtime possibility. Implementations MUST guarantee that a call
+ * scoped to guild A can never read, modify, or delete guild B's data, even
+ * when given an ID or wallet that exists in another guild (such calls behave
+ * exactly as if the record does not exist). See docs/multi-tenancy.md.
  */
 export interface IMemberRepository {
   /**
-   * Get all members.
+   * Get all members belonging to the given guild.
    */
-  getAll(): Promise<Member[]>;
+  getAll(guildId: string): Promise<Member[]>;
 
   /**
-   * Query members with filtering and bounded pagination.
+   * Query the guild's members with filtering and bounded pagination.
    */
-  query(options?: MemberListQuery): Promise<PaginatedResult<Member>>;
+  query(guildId: string, options?: MemberListQuery): Promise<PaginatedResult<Member>>;
 
   /**
-   * Get a member by ID.
+   * Get a member by ID. Returns null when the member does not exist
+   * or belongs to a different guild.
    */
-  getById(id: string): Promise<Member | null>;
+  getById(guildId: string, id: string): Promise<Member | null>;
 
   /**
-   * Get a member by wallet address.
+   * Get a member of the given guild by wallet address. Returns null when no
+   * member with that wallet exists in this guild, even if the same wallet is
+   * a member of another guild.
    */
-  getByWallet(wallet: string): Promise<Member | null>;
+  getByWallet(guildId: string, wallet: string): Promise<Member | null>;
 
   /**
-   * Create a new member.
+   * Create a new member owned by the given guild.
    */
-  create(member: Omit<Member, "id">): Promise<Member>;
+  create(guildId: string, member: MemberCreateData): Promise<Member>;
 
   /**
-   * Update a member.
+   * Update a member. Returns null when the member does not exist
+   * or belongs to a different guild. The owning guild can never change.
+   *
+   * When `expectedVersion` is provided the update is only applied when the
+   * stored version matches — a mismatch results in a thrown ConflictError
+   * rather than a silent overwrite.
    */
-  update(id: string, member: Partial<Member>): Promise<Member | null>;
+  update(guildId: string, id: string, member: MemberUpdateData, expectedVersion?: number): Promise<Member | null>;
 
   /**
-   * Delete a member.
+   * Delete a member. Returns false when the member does not exist
+   * or belongs to a different guild.
    */
-  delete(id: string): Promise<boolean>;
+  delete(guildId: string, id: string): Promise<boolean>;
+
+  /**
+   * Stream all members for a guild in bounded-size chunks.
+   *
+   * The async iterator yields pages internally (cursor-based when backed by
+   * a database); callers simply iterate without managing cursors. Never
+   * materializes the full result set — each page is fetched on demand so
+   * memory usage stays proportional to `chunkSize`, not the total count.
+   */
+  streamAll(guildId: string, chunkSize?: number): AsyncIterable<Member[]>;
 }
 
 /**
  * Repository for managing activity events.
  * Supports append-only semantics for audit trail.
+ *
+ * Multi-tenant isolation guarantee: `append` and `query` require an explicit
+ * `guildId` scope as their first parameter — omitting it is a compile error,
+ * not a runtime possibility, matching {@link IPassRepository} and
+ * {@link IMemberRepository}. `query` never returns another guild's events.
+ * See docs/multi-tenancy.md.
+ *
+ * `hasProcessed`/`markProcessed` are webhook idempotency bookkeeping keyed by
+ * opaque event id, not a member/pass/activity data query, so they remain
+ * workspace-wide.
  */
 export interface IActivityRepository {
   /**
-   * Append an activity event.
+   * Append an activity event owned by the given guild. `schemaVersion`
+   * defaults to the current version when omitted.
    */
-  append(event: Omit<ActivityEvent, "id" | "timestamp">): Promise<ActivityEvent>;
+  append(guildId: string, event: ActivityEventInput): Promise<ActivityEvent>;
 
   /**
-   * Query activity events with optional filtering.
+   * Query the guild's activity events with optional filtering. Never returns
+   * events recorded under a different guild.
    */
-  query(options?: {
+  query(guildId: string, options?: {
     limit?: number;
     type?: ActivityEvent["type"];
     since?: string; // ISO date

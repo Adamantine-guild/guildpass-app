@@ -1,10 +1,22 @@
-import { mkdir, open, readFile, appendFile, rm } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { ActivityEvent } from "./types";
+import {
+  CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
+  upcastActivityEvents,
+} from "@guildpass/integration-client";
+
+import { query } from "../db";
+import { type Activity, mockActivity } from "../mock-data";
 import type { ActivityQuery, ActivityQueryResult } from "./query";
 import { filterActivityEvents } from "./query";
-import { type Activity, mockActivity } from "../mock-data";
+import type { ActivityEvent } from "./types";
+import { recordDurableActivityEvent } from "./hash-chain";
+import {
+  DurableIdempotencyStore,
+  FileIdempotencyStore,
+  InMemoryIdempotencyStore,
+} from "../idempotency/store";
 
 /**
  * Result for idempotent activity writes.
@@ -13,9 +25,6 @@ export type ActivityWriteResult = "recorded" | "duplicate";
 
 /**
  * Durable boundary for webhook idempotency and activity writes.
- *
- * Production deployments can implement this against a database table with a
- * unique constraint on event id. Local development keeps the in-memory adapter.
  */
 export interface IActivityStorage {
   addEvent(event: ActivityEvent): Promise<void>;
@@ -28,11 +37,17 @@ export interface IActivityStorage {
   reset?(): Promise<void>;
 }
 
+interface ActivityStorageOptions {
+  maxEvents?: number;
+  ttlSeconds?: number;
+}
+
+const DEFAULT_ACTIVITY_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 /**
- * Convert old-style mock activities to new ActivityEvent format
+ * Convert old-style mock activities to new ActivityEvent format.
  */
 function convertMockActivityToEvent(activity: Activity): ActivityEvent {
-  // Map old type strings to new ActivityEventType
   const typeMap: Record<Activity["type"], ActivityEvent["type"]> = {
     member_joined: "member.joined",
     pass_created: "pass.created",
@@ -51,6 +66,23 @@ function convertMockActivityToEvent(activity: Activity): ActivityEvent {
     },
     timestamp: activity.timestamp,
     description: activity.description,
+    schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
+  };
+}
+
+function rowToActivityEvent(row: Record<string, unknown>): ActivityEvent {
+  return {
+    id: String(row.id),
+    type: String(row.type) as ActivityEvent["type"],
+    source: String(row.source) as ActivityEvent["source"],
+    severity: String(row.severity) as ActivityEvent["severity"],
+    actor: typeof row.actor === "string" ? JSON.parse(row.actor) : row.actor,
+    timestamp: row.timestamp instanceof Date ? row.timestamp.toISOString() : String(row.timestamp),
+    description: String(row.description),
+    entity: typeof row.entity === "string" ? JSON.parse(row.entity) : row.entity,
+    metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
+    changes: typeof row.changes === "string" ? JSON.parse(row.changes) : row.changes,
+    schemaVersion: Number(row.schema_version),
   };
 }
 
@@ -58,15 +90,18 @@ function convertMockActivityToEvent(activity: Activity): ActivityEvent {
  * In-memory implementation of activity storage.
  * Note: This will reset on server restart.
  */
-class InMemoryActivityStorage implements IActivityStorage {
+export class InMemoryActivityStorage implements IActivityStorage {
   private events: ActivityEvent[] = [];
-  private processedIds = new Set<string>();
+  private readonly idempotencyStore: InMemoryIdempotencyStore;
+  private readonly maxEvents: number;
 
-  constructor() {
-    // Seed with existing mock data converted to new format
+  constructor(options: ActivityStorageOptions = {}) {
+    this.maxEvents = options.maxEvents ?? 1000;
+    this.idempotencyStore = new InMemoryIdempotencyStore(options.ttlSeconds);
+
     mockActivity.forEach((activity) => {
       this.events.unshift(convertMockActivityToEvent(activity));
-      this.processedIds.add(activity.id);
+      void this.idempotencyStore.markSeen(activity.id);
     });
   }
 
@@ -81,11 +116,8 @@ class InMemoryActivityStorage implements IActivityStorage {
     }
 
     this.events.unshift(event);
-
-    // Keep a reasonable limit in memory
-    if (this.events.length > 1000) {
-      const removed = this.events.pop();
-      if (removed) this.processedIds.delete(removed.id);
+    if (this.events.length > this.maxEvents) {
+      this.events.pop();
     }
 
     return "recorded";
@@ -108,43 +140,34 @@ class InMemoryActivityStorage implements IActivityStorage {
   }
 
   async hasProcessedEvent(eventId: string): Promise<boolean> {
-    return this.processedIds.has(eventId);
+    return this.idempotencyStore.hasSeen(eventId);
   }
 
   async recordProcessedEvent(eventId: string): Promise<ActivityWriteResult> {
-    if (this.processedIds.has(eventId)) {
-      return "duplicate";
-    }
-
-    this.processedIds.add(eventId);
-    return "recorded";
+    return (await this.idempotencyStore.markSeen(eventId)) ? "recorded" : "duplicate";
   }
 
   async reset(): Promise<void> {
     this.events = [];
-    this.processedIds.clear();
     mockActivity.forEach((activity) => {
       this.events.unshift(convertMockActivityToEvent(activity));
-      this.processedIds.add(activity.id);
+      void this.idempotencyStore.markSeen(activity.id);
     });
   }
 }
 
 /**
- * File-backed adapter for local durable mode.
- *
- * The processed-event marker uses exclusive file creation, which gives us an
- * atomic insert-or-conflict behavior for retries in the same shared directory.
- * Hosted production should use the same interface with a database-backed
- * adapter and a unique index on the webhook event id.
+ * File-backed adapter for local persistent mode.
  */
 export class FileActivityStorage implements IActivityStorage {
-  private processedDir: string;
-  private eventsPath: string;
+  private readonly processedStore: FileIdempotencyStore;
+  private readonly eventsPath: string;
+  private readonly maxEvents: number;
 
-  constructor(private rootDir: string) {
-    this.processedDir = join(rootDir, "processed-webhooks");
+  constructor(rootDir: string, options: ActivityStorageOptions = {}) {
+    this.processedStore = new FileIdempotencyStore(rootDir, options.ttlSeconds);
     this.eventsPath = join(rootDir, "activity-events.jsonl");
+    this.maxEvents = options.maxEvents ?? 1000;
   }
 
   async addEvent(event: ActivityEvent): Promise<void> {
@@ -170,11 +193,12 @@ export class FileActivityStorage implements IActivityStorage {
 
     try {
       const file = await readFile(this.eventsPath, "utf8");
-      return file
+      const raws = file
         .split("\n")
         .filter(Boolean)
-        .map((line) => JSON.parse(line) as ActivityEvent)
+        .map((line) => JSON.parse(line))
         .reverse();
+      return upcastActivityEvents(raws);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return [];
@@ -188,11 +212,13 @@ export class FileActivityStorage implements IActivityStorage {
 
     try {
       const raw = await readFile(this.eventsPath, "utf8");
-      const events = raw
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as ActivityEvent)
-        .reverse();
+      const events = upcastActivityEvents(
+        raw
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+          .reverse()
+      );
 
       return filterActivityEvents(events, query);
     } catch (error) {
@@ -208,53 +234,86 @@ export class FileActivityStorage implements IActivityStorage {
   }
 
   async hasProcessedEvent(eventId: string): Promise<boolean> {
-    await this.ensureStore();
-
-    try {
-      await readFile(this.markerPath(eventId), "utf8");
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
-      }
-      throw error;
-    }
+    return this.processedStore.hasSeen(eventId);
   }
 
   async recordProcessedEvent(eventId: string): Promise<ActivityWriteResult> {
-    await this.ensureStore();
-
-    try {
-      const marker = await open(this.markerPath(eventId), "wx");
-      await marker.writeFile(new Date().toISOString(), "utf8");
-      await marker.close();
-      return "recorded";
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        return "duplicate";
-      }
-      throw error;
-    }
+    return (await this.processedStore.markSeen(eventId)) ? "recorded" : "duplicate";
   }
 
   async reset(): Promise<void> {
-    await rm(this.rootDir, { recursive: true, force: true });
+    await rm(join(this.eventsPath, ".."), { recursive: true, force: true });
     await this.ensureStore();
   }
 
-  private markerPath(eventId: string): string {
-    return join(this.processedDir, encodeURIComponent(eventId));
+  private async ensureStore(): Promise<void> {
+    await mkdir(join(this.eventsPath, ".."), { recursive: true });
+  }
+}
+
+/**
+ * Durable PostgreSQL-backed activity storage.
+ *
+ * This is the multi-instance-safe mode for webhook idempotency.
+ */
+export class DurableActivityStorage implements IActivityStorage {
+  private readonly idempotencyStore: DurableIdempotencyStore;
+  private readonly maxEvents: number;
+  private readonly ttlSeconds: number;
+
+  constructor(options: ActivityStorageOptions = {}) {
+    this.idempotencyStore = new DurableIdempotencyStore(options.ttlSeconds);
+    this.maxEvents = options.maxEvents ?? 1000;
+    this.ttlSeconds = options.ttlSeconds ?? DEFAULT_ACTIVITY_TTL_SECONDS;
   }
 
-  private async ensureStore(): Promise<void> {
-    await mkdir(this.processedDir, { recursive: true });
+  async addEvent(event: ActivityEvent): Promise<void> {
+    await this.recordActivityEvent(event);
+  }
+
+  async getEvents(limit?: number): Promise<ActivityEvent[]> {
+    const queryLimit = limit ? `LIMIT ${limit}` : "";
+    const result = await query(
+      `SELECT * FROM activity_events ORDER BY timestamp DESC, chain_sequence DESC ${queryLimit}`,
+    );
+    return result.rows.map((row) => rowToActivityEvent(row));
+  }
+
+  async queryEvents(queryOptions: ActivityQuery = {}): Promise<ActivityQueryResult> {
+    const events = await this.getEvents();
+    return filterActivityEvents(events, queryOptions);
+  }
+
+  async isDuplicate(eventId: string): Promise<boolean> {
+    return this.hasProcessedEvent(eventId);
+  }
+
+  async hasProcessedEvent(eventId: string): Promise<boolean> {
+    return this.idempotencyStore.hasSeen(eventId);
+  }
+
+  async recordProcessedEvent(eventId: string): Promise<ActivityWriteResult> {
+    return (await this.idempotencyStore.markSeen(eventId)) ? "recorded" : "duplicate";
+  }
+
+  async recordActivityEvent(event: ActivityEvent): Promise<ActivityWriteResult> {
+    return recordDurableActivityEvent(event, this.ttlSeconds);
   }
 }
 
 function createActivityStorage(): IActivityStorage {
-  if (process.env.ACTIVITY_STORAGE_MODE === "file") {
+  const mode = (process.env.ACTIVITY_STORAGE_MODE || "memory").toLowerCase();
+
+  if (mode === "durable") {
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL is required when ACTIVITY_STORAGE_MODE=durable");
+    }
+    return new DurableActivityStorage();
+  }
+
+  if (mode === "file") {
     return new FileActivityStorage(
-      process.env.ACTIVITY_STORAGE_DIR ?? join(process.cwd(), ".guildpass-activity")
+      process.env.ACTIVITY_STORAGE_DIR ?? join(process.cwd(), ".guildpass-activity"),
     );
   }
 

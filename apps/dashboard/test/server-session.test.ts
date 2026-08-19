@@ -1,179 +1,130 @@
+import { describe, test, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+
 /**
- * test/server-session.test.ts
+ * Tests for issue #140: session resolution for Server Components must resolve a
+ * real Session from a valid signed token and reject missing / expired / tampered
+ * tokens with UnauthorizedError.
  *
- * Tests for the server-side session resolution module.
- *
- * Coverage:
- *  - Mock mode returns MOCK_API_SESSION (predictable local role testing)
- *  - Live mode throws UnauthorizedError (not yet implemented)
- *  - requireDashboardSession delegates to getDashboardSession
- *  - UnauthorizedError carries statusCode 401
+ * We test resolveServerComponentSession (the pure core) directly, feeding it the
+ * cookie/header values getServerComponentSession would read. Tokens are minted
+ * by the real session store, so genuine HS256 verification runs — nothing is
+ * stubbed.
  */
 
-import { test, describe, afterEach } from "node:test";
-import assert from "node:assert/strict";
-import {
-  getDashboardSession,
-  requireDashboardSession,
-  UnauthorizedError,
-} from "../lib/auth/server-session.ts";
-import { MOCK_API_SESSION } from "../lib/auth/session.ts";
+process.env.SESSION_SIGNING_SECRET = "test-signing-secret-for-server-session";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const { resolveServerComponentSession, UnauthorizedError, resetSessionStore } =
+  await import("../lib/auth/server-session");
+const { createSessionStore, clearSessionStore } = await import("../lib/auth/session-store");
 
-function makeRequest(): Request {
-  return new Request("http://localhost:3000/api/test");
+beforeEach(() => {
+  resetSessionStore();
+});
+
+afterEach(() => {
+  clearSessionStore();
+});
+
+type Role = "owner" | "admin" | "moderator" | "readonly";
+
+async function mintValidToken(role: Role = "admin") {
+  const store = createSessionStore();
+  const { accessToken } = await store.createSession({
+    userId: "user-1",
+    name: "Test User",
+    role,
+  });
+  return accessToken;
 }
 
-// ── UnauthorizedError ────────────────────────────────────────────────────────
-
-describe("UnauthorizedError", () => {
-  test("is an instance of Error", () => {
-    const e = new UnauthorizedError();
-    assert.ok(e instanceof Error);
+describe("resolveServerComponentSession — valid session", () => {
+  test("a valid cookie token resolves to a Session with role-appropriate permissions", async () => {
+    const token = await mintValidToken("admin");
+    const session = await resolveServerComponentSession(token, null);
+    assert.equal(session.userId, "user-1");
+    assert.equal(session.role, "admin");
+    assert.ok(session.permissions.includes("settings:write"));
   });
 
-  test("name is 'UnauthorizedError'", () => {
-    const e = new UnauthorizedError();
-    assert.equal(e.name, "UnauthorizedError");
+  test("falls back to a valid Bearer header when no cookie", async () => {
+    const token = await mintValidToken("readonly");
+    const session = await resolveServerComponentSession(null, `Bearer ${token}`);
+    assert.equal(session.role, "readonly");
+    assert.equal(session.permissions.includes("settings:write"), false);
   });
 
-  test("statusCode is 401", () => {
-    const e = new UnauthorizedError();
-    assert.equal(e.statusCode, 401);
-  });
-
-  test("default message is descriptive", () => {
-    const e = new UnauthorizedError();
-    assert.ok(e.message.includes("Unauthorized"));
-  });
-
-  test("accepts a custom message", () => {
-    const e = new UnauthorizedError("Custom error");
-    assert.equal(e.message, "Custom error");
+  test("cookie takes precedence over header", async () => {
+    const cookieToken = await mintValidToken("owner");
+    const headerToken = await mintValidToken("readonly");
+    const session = await resolveServerComponentSession(cookieToken, `Bearer ${headerToken}`);
+    assert.equal(session.role, "owner");
   });
 });
 
-// ── getDashboardSession (mock mode) ───────────────────────────────────────────
-
-describe("getDashboardSession — mock mode", () => {
-  const request = makeRequest();
-
-  test("returns a Session object", () => {
-    const session = getDashboardSession(request);
-    assert.ok(session);
-    assert.equal(typeof session.userId, "string");
-    assert.equal(typeof session.role, "string");
-    assert.ok(Array.isArray(session.permissions));
-  });
-
-  test("returns MOCK_API_SESSION (same userId and role)", () => {
-    const session = getDashboardSession(request);
-    assert.equal(session.userId, MOCK_API_SESSION.userId);
-    assert.equal(session.role, MOCK_API_SESSION.role);
-    assert.equal(session.name, MOCK_API_SESSION.name);
-  });
-
-  test("permissions match the role defined by MOCK_API_ROLE", () => {
-    const session = getDashboardSession(request);
-    assert.deepEqual(session.permissions, MOCK_API_SESSION.permissions);
-  });
-
-  test("works independently of the request content (mock ignores it)", () => {
-    const session1 = getDashboardSession(makeRequest());
-    const session2 = getDashboardSession(new Request("http://localhost:3000/api/other"));
-    assert.equal(session1.userId, session2.userId);
-  });
-});
-
-// ── requireDashboardSession (mock mode) ───────────────────────────────────────
-
-describe("requireDashboardSession — mock mode", () => {
-  const request = makeRequest();
-
-  test("returns the same session as getDashboardSession", () => {
-    const got = getDashboardSession(request);
-    const required = requireDashboardSession(request);
-    assert.equal(required.userId, got.userId);
-    assert.equal(required.role, got.role);
-  });
-
-  test("does not throw in mock mode", () => {
-    assert.doesNotThrow(() => {
-      requireDashboardSession(makeRequest());
-    });
-  });
-});
-
-// ── getDashboardSession (live mode — not implemented) ─────────────────────────
-
-describe("getDashboardSession — live mode (not yet implemented)", () => {
-  const originalMode = process.env.DASHBOARD_API_MODE;
-  const request = makeRequest();
-
-  afterEach(() => {
-    // Restore original env after each test
-    if (originalMode === undefined) {
-      delete process.env.DASHBOARD_API_MODE;
-    } else {
-      process.env.DASHBOARD_API_MODE = originalMode;
-    }
-  });
-
-  test("throws UnauthorizedError when DASHBOARD_API_MODE=live", () => {
-    process.env.DASHBOARD_API_MODE = "live";
-    assert.throws(
-      () => getDashboardSession(request),
+describe("resolveServerComponentSession — missing session", () => {
+  test("throws UnauthorizedError with a distinct 'missing' message when both are absent", async () => {
+    await assert.rejects(
+      () => resolveServerComponentSession(null, null),
       (err: unknown) => {
-        assert.ok(err instanceof UnauthorizedError, "should be UnauthorizedError");
+        assert.ok(err instanceof UnauthorizedError);
+        assert.match(err.message, /no session cookie or authorization header/i);
         return true;
-      }
+      },
     );
   });
 
-  test("thrown error has statusCode 401", () => {
-    process.env.DASHBOARD_API_MODE = "live";
-    try {
-      getDashboardSession(request);
-      assert.fail("should have thrown");
-    } catch (err) {
-      assert.ok(err instanceof UnauthorizedError);
-      assert.equal(err.statusCode, 401);
-    }
-  });
-
-  test("thrown error message mentions live mode", () => {
-    process.env.DASHBOARD_API_MODE = "live";
-    try {
-      getDashboardSession(request);
-    } catch (err) {
-      assert.ok(err instanceof Error);
-      assert.ok(
-        err.message.toLowerCase().includes("live"),
-        `message "${err.message}" should mention live mode`
-      );
-    }
+  test("a malformed Authorization header (no Bearer) counts as missing", async () => {
+    await assert.rejects(
+      () => resolveServerComponentSession(null, "Basic abc123"),
+      (err: unknown) => {
+        assert.ok(err instanceof UnauthorizedError);
+        assert.match(err.message, /no session cookie or authorization header/i);
+        return true;
+      },
+    );
   });
 });
 
-// ── requireDashboardSession (live mode — not implemented) ─────────────────────
-
-describe("requireDashboardSession — live mode (not yet implemented)", () => {
-  const originalMode = process.env.DASHBOARD_API_MODE;
-
-  afterEach(() => {
-    if (originalMode === undefined) {
-      delete process.env.DASHBOARD_API_MODE;
-    } else {
-      process.env.DASHBOARD_API_MODE = originalMode;
-    }
+describe("resolveServerComponentSession — tampered / invalid token", () => {
+  test("a token with a mutated payload is rejected as invalid", async () => {
+    const good = await mintValidToken("readonly");
+    const [h, p, s] = good.split(".");
+    const tamperedPayload = p.slice(0, -1) + (p.slice(-1) === "A" ? "B" : "A");
+    await assert.rejects(
+      () => resolveServerComponentSession(`${h}.${tamperedPayload}.${s}`, null),
+      (err: unknown) => {
+        assert.ok(err instanceof UnauthorizedError);
+        assert.match(err.message, /invalid or expired/i);
+        return true;
+      },
+    );
   });
 
-  test("throws UnauthorizedError when DASHBOARD_API_MODE=live", () => {
-    process.env.DASHBOARD_API_MODE = "live";
-    assert.throws(
-      () => requireDashboardSession(makeRequest()),
-      UnauthorizedError
+  test("a structurally malformed token is rejected", async () => {
+    await assert.rejects(
+      () => resolveServerComponentSession("not-a-real-jwt", null),
+      (err: unknown) => err instanceof UnauthorizedError,
     );
+  });
+});
+
+describe("resolveServerComponentSession — expired token", () => {
+  test("a token past its exp is rejected", async () => {
+    const token = await mintValidToken("admin");
+    const realNow = Date.now;
+    Date.now = () => realNow() + 16 * 60 * 1000;
+    try {
+      await assert.rejects(
+        () => resolveServerComponentSession(token, null),
+        (err: unknown) => {
+          assert.ok(err instanceof UnauthorizedError);
+          assert.match(err.message, /invalid or expired/i);
+          return true;
+        },
+      );
+    } finally {
+      Date.now = realNow;
+    }
   });
 });

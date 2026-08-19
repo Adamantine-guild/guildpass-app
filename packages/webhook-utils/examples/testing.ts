@@ -25,7 +25,7 @@ export function testVerificationLogic() {
 
   console.assert(result.valid === true, "Should verify valid signature");
   console.assert(result.timestamp === timestamp, "Should return timestamp");
-  console.log("✓ Verification logic test passed");
+  console.log("✓ Verification logic test passed successfully");
 }
 
 /**

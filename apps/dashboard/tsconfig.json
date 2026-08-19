@@ -15,9 +15,18 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{"name": "next"}],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "baseUrl": ".",
-    "paths": {"@/*": ["./*"]}
+    "ignoreDeprecations": "5.0",
+    "paths": {
+      "@/*": ["./*"],
+      "@guildpass/integration-client/*": ["../../packages/integration-client/*"],
+      "@guildpass/mock-repositories": ["../../packages/integration-client/mock/mockRepositories"]
+    }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]

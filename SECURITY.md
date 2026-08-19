@@ -42,4 +42,33 @@ This repository contains: <!-- IC: 198 -->
 - We ask for a **90-day** coordinated disclosure window before public disclosure. <!-- IC: 211 -->
 - We will credit reporters in the release notes unless you prefer to remain anonymous.
 
+## Webhook Endpoint Abuse Defenses
+
+The dashboard webhook endpoint (`POST /api/webhooks`) applies two guards
+ahead of signature verification and logs every rejection in a structured
+format:
+
+- **Payload size limit** — bodies larger than `WEBHOOK_MAX_BODY_BYTES`
+  (default `262144` = 256 KB) are rejected with `413` before any HMAC work,
+  checked against both the declared `content-length` and the actual body
+  size.
+- **Failed-verification rate limit** — a source (first `x-forwarded-for`
+  address, else `x-real-ip`) that produces more than
+  `WEBHOOK_INVALID_ATTEMPT_LIMIT` (default `10`) failed verifications within
+  `WEBHOOK_RATE_LIMIT_WINDOW_MS` (default `60000` ms) is rejected with `429`
+  until the sliding window expires. A successful verification resets the
+  source's window, so legitimate senders are unaffected. The limiter is
+  in-process; multi-instance deployments should back it with shared storage.
+
+Every rejection emits one JSON log line via `console.warn`:
+
+```json
+{"event":"webhook_rejected","reason":"invalid_signature","source":"203.0.113.9","endpoint":"/api/webhooks","status":401,"ts":"2026-07-24T00:00:00.000Z"}
+```
+
+`reason` is one of `oversized_payload`, `invalid_signature`,
+`expired_timestamp`, `rate_limited`, `malformed_header`. The log NEVER
+contains the webhook secret, the signature header value, or the request
+body — only the metadata above, which is safe to ship to alerting.
+
 Thank you for helping keep GuildPass secure.

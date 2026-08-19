@@ -1,32 +1,28 @@
 import { NextResponse } from "next/server";
 import type {
-  ApiErrorCode,
-  ApiErrorResponse,
-  ApiFieldError,
-  ApiResult,
-  ApiSuccess,
-  ApiUnsupportedResponse,
-  ApiValidationErrorResponse,
+ApiErrorCode,
+ApiErrorResponse,
+ApiFieldError,
+ApiResult,
+ApiSuccess,
+ApiUnsupportedResponse,
+ApiValidationErrorResponse,
 } from "./api-contracts";
 import { isPublicApiError, ValidationError } from "@/lib/api-errors";
+import { httpRequestsTotal, httpRequestDuration } from "@guildpass/metrics";
 
 export type UnsupportedResponse = {
-  error: string;
-  code: "UNSUPPORTED_IN_LIVE_MODE";
+error: string;
+code: "UNSUPPORTED_IN_LIVE_MODE";
 };
 
 export function apiResponse<T>(
-  data: T,
-  init?: ResponseInit
+data: T,
+init?: ResponseInit
 ): NextResponse<ApiSuccess<T>> {
-  return NextResponse.json({ ok: true, data }, init);
+return NextResponse.json({ ok: true, data }, init);
 }
 
-/**
- * Build a JSON error response. `errorId` is included when present so a client
- * can quote it in a bug report and an operator can grep the server logs for the
- * matching entry.
- */
 export function apiError(
   message: string,
   status: number = 500,
@@ -66,10 +62,6 @@ export function apiUnsupported(
   );
 }
 
-/**
- * Generate a short correlation id for an internal error. Used to tie a generic
- * client-facing 500 back to the full detail captured in the server logs.
- */
 function newErrorId(): string {
   return (
     globalThis.crypto?.randomUUID?.() ??
@@ -77,12 +69,6 @@ function newErrorId(): string {
   );
 }
 
-/**
- * Returns a 501 response indicating that this endpoint is not available in live mode.
- * The client-side code checks for the `code` field to distinguish unsupported live
- * operations from transient errors, so it can show an appropriate UI instead of
- * silently falling back to mock data.
- */
 export function apiUnsupportedLegacy(
   message: string
 ): NextResponse<UnsupportedResponse> {
@@ -93,29 +79,37 @@ export function apiUnsupportedLegacy(
 }
 
 export async function handleApiError<T>(
-  fn: () => Promise<T | NextResponse>
+  fn: () => Promise<T | NextResponse>,
+  route: string = "unknown"
 ): Promise<NextResponse<ApiResult<T>>> {
+  const start = performance.now();
   try {
     const data = await fn();
+    const duration = (performance.now() - start) / 1000;
+
+    // Record Success
+    httpRequestDuration.observe({ method: 'GET', route }, duration);
+    httpRequestsTotal.inc({ method: 'GET', route, status_code: '200' });
+
     if (data instanceof Response) {
       return data as NextResponse<ApiResult<T>>;
     }
-
     return apiResponse(data);
   } catch (err) {
-    // Expected, client-safe errors (validation, permission, not-found) carry
-    // their own status and an intentional message — surface them as-is.
+    const duration = (performance.now() - start) / 1000;
+    httpRequestDuration.observe({ method: 'GET', route }, duration);
+
     if (isPublicApiError(err)) {
+      httpRequestsTotal.inc({ method: 'GET', route, status_code: err.statusCode.toString() });
       if (err instanceof ValidationError && err.fields) {
         return apiValidationError(err.message, err.fields, err.statusCode);
       }
       return apiError(err.message, err.statusCode);
     }
 
-    // Anything else is an unexpected internal failure. Log the full detail with
-    // a correlation id, but never return the raw message to the client.
     const errorId = newErrorId();
     console.error(`API Error [${errorId}]:`, err);
+    httpRequestsTotal.inc({ method: 'GET', route, status_code: '500' });
     return apiError("An unexpected error occurred", 500, "SERVER_ERROR", errorId);
   }
 }
@@ -124,6 +118,7 @@ function inferErrorCode(status: number): ApiErrorCode {
   if (status === 401) return "UNAUTHORIZED";
   if (status === 403) return "FORBIDDEN";
   if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "CONFLICT";
   if (status === 502) return "UPSTREAM_ERROR";
   if (status >= 500) return "SERVER_ERROR";
   return "BAD_REQUEST";

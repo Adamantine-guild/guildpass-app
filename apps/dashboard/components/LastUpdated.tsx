@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 
 interface LastUpdatedProps {
   date: Date | null;
@@ -9,7 +10,7 @@ interface LastUpdatedProps {
   autoRefresh?: boolean;
 }
 
-/** Displays a human-readable "Last updated X s/m ago" label, refreshing every 10 s. */
+/** Displays a human-readable "Last updated X s/m/h/d ago" label, refreshing every 10 s. */
 export default function LastUpdated({ date, className = "", autoRefresh = false }: LastUpdatedProps) {
   const [label, setLabel] = useState<string>("");
 
@@ -17,13 +18,7 @@ export default function LastUpdated({ date, className = "", autoRefresh = false 
     if (!date) return;
 
     const update = () => {
-      const secs = Math.floor((Date.now() - date.getTime()) / 1000);
-      if (secs < 5)  { setLabel("just now"); return; }
-      if (secs < 60) { setLabel(`${secs}s ago`); return; }
-      const mins = Math.floor(secs / 60);
-      if (mins < 60) { setLabel(`${mins}m ago`); return; }
-      const hours = Math.floor(mins / 60);
-      setLabel(`${hours}h ago`);
+      setLabel(formatRelativeTime(date));
     };
 
     update();

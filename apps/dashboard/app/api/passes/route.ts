@@ -1,14 +1,13 @@
 import type { NextResponse } from "next/server";
 import {
-  apiError,
   apiUnsupported,
   apiValidationError,
   handleApiError,
 } from "@/lib/api-helpers";
 import { NotFoundError } from "@/lib/api-errors";
 import { mockPasses, type Pass } from "@/lib/mock-data";
-import { requireDashboardSession, UnauthorizedError } from "@/lib/auth/server-session";
-import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
+import { getActiveGuildId } from "@/lib/guild-context";
+import { requireSessionAndPermission } from "@/lib/auth/require-permission";
 import { getApiMode } from "@/lib/env";
 import { getPassRepository } from "@/lib/repositories/factory";
 import type { PassListQuery } from "@/lib/repositories/types";
@@ -39,10 +38,10 @@ export async function GET(
 
     try {
       const passRepository = getPassRepository();
-      return await passRepository.query(query);
+      return await passRepository.query(getActiveGuildId(request), query);
     } catch (error) {
       console.error("Error fetching passes:", error);
-      return getFallbackPasses(query);
+      return getFallbackPasses(request, query);
     }
   });
 }
@@ -64,25 +63,17 @@ function isPassStatus(value: string | null): value is Pass["status"] {
   return value !== null && PASS_STATUSES.includes(value as Pass["status"]);
 }
 
-function getFallbackPasses(query: PassListQuery) {
-  const filtered = filterPasses(mockPasses, query);
+function getFallbackPasses(request: Request, query: PassListQuery) {
+  const guildId = getActiveGuildId(request);
+  const scoped = mockPasses.filter((pass) => pass.guildId === guildId);
+  const filtered = filterPasses(scoped, query);
   return paginateItems(filtered, query);
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  let session;
-  try {
-    session = requireDashboardSession(request);
-    assertPermission(session, "passes:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
-    }
-    if (err instanceof UnauthorizedError) {
-      return apiError(err.message, 401);
-    }
-    throw err;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "passes:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   return handleApiError(async () => {
     let body: unknown;
@@ -98,30 +89,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const created = await passRepository.create(validation.data);
-    await recordDashboardActivity({
+    const guildId = getActiveGuildId(request);
+    const created = await passRepository.create(guildId, validation.data);
+    await recordDashboardActivity(guildId, {
       type: "pass.created",
       entity: { type: "pass", id: created.id, name: created.name },
-      actor: { id: session!.userId, name: session!.name },
+      actor: { id: session.userId, name: session.name },
     });
     return created;
   });
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  let session;
-  try {
-    session = requireDashboardSession(request);
-    assertPermission(session, "passes:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
-    }
-    if (err instanceof UnauthorizedError) {
-      return apiError(err.message, 401);
-    }
-    throw err;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "passes:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -146,31 +128,22 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     }
 
     const passRepository = getPassRepository();
-    const updated = await passRepository.update(id, validation.data);
+    const guildId = getActiveGuildId(request);
+    const updated = await passRepository.update(guildId, id, validation.data);
     if (!updated) throw new NotFoundError("Pass not found.");
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "pass.updated",
       entity: { type: "pass", id: updated.id, name: updated.name },
-      actor: { id: session!.userId, name: session!.name },
+      actor: { id: session.userId, name: session.name },
     });
     return updated;
   });
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  let session;
-  try {
-    session = requireDashboardSession(request);
-    assertPermission(session, "passes:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
-    }
-    if (err instanceof UnauthorizedError) {
-      return apiError(err.message, 401);
-    }
-    throw err;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "passes:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -183,14 +156,15 @@ export async function DELETE(request: Request): Promise<NextResponse> {
 
   return handleApiError(async () => {
     const passRepository = getPassRepository();
-    const pass = await passRepository.getById(id);
+    const guildId = getActiveGuildId(request);
+    const pass = await passRepository.getById(guildId, id);
     if (!pass) throw new NotFoundError("Pass not found.");
-    const success = await passRepository.delete(id);
+    const success = await passRepository.delete(guildId, id);
     if (!success) throw new NotFoundError("Pass not found.");
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "pass.deleted",
       entity: { type: "pass", id: pass.id, name: pass.name },
-      actor: { id: session!.userId, name: session!.name },
+      actor: { id: session.userId, name: session.name },
     });
     return { success: true };
   });

@@ -2,18 +2,33 @@
 
 import DashboardLayout from "@/components/DashboardLayout";
 import EmptyState from "@/components/EmptyState";
+import PaginationControls from "@/components/PaginationControls";
 import RoleEditor from "@/components/RoleEditor";
 import StatusBadge from "@/components/StatusBadge";
+import WalletAddressText from "@/components/WalletAddressText";
 import UnsupportedBanner from "@/components/UnsupportedBanner";
 import { ApiClientError, readApiResult } from "@/lib/api-client";
+import { tryNormaliseAddress } from "@/lib/address";
 import { getClientApiMode } from "@/lib/client-env";
 import { useSession } from "@/lib/hooks/useSession";
 import { useOptimisticMutation } from "@/lib/hooks/useOptimisticMutation";
 import { MEMBER_ROLES } from "@/lib/member-roles";
-import { mockMembers, type Member as MockMember } from "@/lib/mock-data";
+import { toMembersCsv } from "@/lib/members-csv";
+import type { Member as MockMember } from "@/lib/mock-data";
 import { canManageMembers } from "@/lib/permissions";
 import type { PaginatedResult } from "@/lib/repositories/types";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useGuild } from "@/lib/guild/GuildProvider";
+import { guildFetch } from "@/lib/guild/api";
+import { getMembersForGuild } from "@/lib/data/guild-scoped";
+import {
+  dashboardQueryCache,
+  invalidateAfterMutation,
+  queryKeys,
+} from "@/lib/cache/query-cache";
+import { useQueryInvalidation } from "@/lib/cache/use-query-invalidation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+
 
 type ListState = "loading" | "loaded" | "unsupported" | "error";
 type MemberStatusFilter = MockMember["status"] | "all";
@@ -31,34 +46,218 @@ const emptyPage: PaginatedResult<MockMember> = {
   hasPreviousPage: false,
 };
 
-export default function MembersPage() {
-  const session = useSession();
-  const canWrite = canManageMembers(session);
-  const apiMode = getClientApiMode();
+function readStatusFilter(value: string | null): MemberStatusFilter {
+  return value === "active" || value === "inactive" || value === "pending" ? value : "all";
+}
 
-  const [members, setMembers] = useState<MockMember[]>(mockMembers.slice(0, PAGE_SIZE));
+function readRoleFilter(value: string | null): MemberRoleFilter {
+  return value && MEMBER_ROLES.includes(value as (typeof MEMBER_ROLES)[number])
+    ? (value as MemberRoleFilter)
+    : "all";
+}
+
+function readPageFilter(value: string | null): number {
+  if (!value) return 1;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+}
+
+function readDateFilter(value: string | null): string {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+}
+
+function MembersPageContent() {
+  const session = useSession();
+  const canWrite = canManageMembers(session, session.activeGuildId);
+  const apiMode = getClientApiMode();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { guildId, guild, guilds, setGuildId } = useGuild();
+
+  const seedMembers = getMembersForGuild(guildId);
+  const [members, setMembers] = useState<MockMember[]>(seedMembers.slice(0, PAGE_SIZE));
   const [pagination, setPagination] = useState<PaginatedResult<MockMember>>({
     ...emptyPage,
-    items: mockMembers.slice(0, PAGE_SIZE),
-    total: mockMembers.length,
-    hasNextPage: mockMembers.length > PAGE_SIZE,
+    items: seedMembers.slice(0, PAGE_SIZE),
+    total: seedMembers.length,
+    hasNextPage: seedMembers.length > PAGE_SIZE,
   });
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [listState, setListState] = useState<ListState>("loading");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<MemberStatusFilter>("all");
-  const [role, setRole] = useState<MemberRoleFilter>("all");
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
+  const [status, setStatus] = useState<MemberStatusFilter>(() => readStatusFilter(searchParams.get("status")));
+  const [role, setRole] = useState<MemberRoleFilter>(() => readRoleFilter(searchParams.get("role")));
+  const [joinedFrom, setJoinedFrom] = useState(() => readDateFilter(searchParams.get("joinedFrom")));
+  const [joinedTo, setJoinedTo] = useState(() => readDateFilter(searchParams.get("joinedTo")));
+  const [page, setPage] = useState(() => readPageFilter(searchParams.get("page")));
   const debouncedSearch = useDebouncedValue(search, 250);
   const previousMembersRef = useRef<MockMember[]>(members);
+  const membersQueryKey = useMemo(
+    () => queryKeys.members(guildId, {
+      page,
+      limit: PAGE_SIZE,
+      search: debouncedSearch.trim() || undefined,
+      status: status === "all" ? undefined : status,
+      role: role === "all" ? undefined : role,
+      joinedFrom: joinedFrom || undefined,
+      joinedTo: joinedTo || undefined,
+    }),
+    [debouncedSearch, guildId, joinedFrom, joinedTo, page, role, status]
+  );
+  const cacheRevision = useQueryInvalidation(membersQueryKey);
 
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [form, setForm] = useState({ name: "", wallet: "" });
+  const [walletError, setWalletError] = useState<string | null>(null);
+
+  const updateFilterQuery = useCallback(
+    (updates: {
+      search?: string;
+      status?: MemberStatusFilter;
+      role?: MemberRoleFilter;
+      joinedFrom?: string;
+      joinedTo?: string;
+      guild?: string;
+      page?: number | null;
+    }) => {
+      const next = new URLSearchParams(searchParams.toString());
+
+      if (updates.search !== undefined) {
+        const value = updates.search.trim();
+        if (value) {
+          next.set("search", value);
+        } else {
+          next.delete("search");
+        }
+      }
+      if (updates.status !== undefined) {
+        if (updates.status === "all") {
+          next.delete("status");
+        } else {
+          next.set("status", updates.status);
+        }
+      }
+      if (updates.role !== undefined) {
+        if (updates.role === "all") {
+          next.delete("role");
+        } else {
+          next.set("role", updates.role);
+        }
+      }
+      if (updates.joinedFrom !== undefined) {
+        if (updates.joinedFrom) {
+          next.set("joinedFrom", updates.joinedFrom);
+        } else {
+          next.delete("joinedFrom");
+        }
+      }
+      if (updates.joinedTo !== undefined) {
+        if (updates.joinedTo) {
+          next.set("joinedTo", updates.joinedTo);
+        } else {
+          next.delete("joinedTo");
+        }
+      }
+      if (updates.guild !== undefined) {
+        if (updates.guild) {
+          next.set("guild", updates.guild);
+        } else {
+          next.delete("guild");
+        }
+      }
+      if (updates.page !== undefined) {
+        if (updates.page && updates.page > 1) {
+          next.set("page", String(updates.page));
+        } else {
+          next.delete("page");
+        }
+      }
+
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+    updateFilterQuery({ search: value, page: null });
+  };
+
+  const handleStatusChange = (value: MemberStatusFilter) => {
+    setStatus(value);
+    setPage(1);
+    updateFilterQuery({ status: value, page: null });
+  };
+
+  const handleRoleChange = (value: MemberRoleFilter) => {
+    setRole(value);
+    setPage(1);
+    updateFilterQuery({ role: value, page: null });
+  };
+
+  const handleJoinedFromChange = (value: string) => {
+    setJoinedFrom(value);
+    setPage(1);
+    updateFilterQuery({ joinedFrom: value, page: null });
+  };
+
+  const handleJoinedToChange = (value: string) => {
+    setJoinedTo(value);
+    setPage(1);
+    updateFilterQuery({ joinedTo: value, page: null });
+  };
+
+  const handleGuildFilterChange = (value: string) => {
+    setGuildId(value);
+    setPage(1);
+    updateFilterQuery({ guild: value, page: null });
+  };
+
+  const handlePageChange = (value: number) => {
+    const nextPage = Math.max(1, value);
+    setPage(nextPage);
+    updateFilterQuery({ page: nextPage === 1 ? null : nextPage });
+  };
 
   useEffect(() => {
+    const nextSearch = searchParams.get("search") ?? "";
+    const nextStatus = readStatusFilter(searchParams.get("status"));
+    const nextRole = readRoleFilter(searchParams.get("role"));
+    const nextJoinedFrom = readDateFilter(searchParams.get("joinedFrom"));
+    const nextJoinedTo = readDateFilter(searchParams.get("joinedTo"));
+    const nextPage = readPageFilter(searchParams.get("page"));
+    const nextGuildId = searchParams.get("guild");
+
+    if (nextSearch !== search) setSearch(nextSearch);
+    if (nextStatus !== status) setStatus(nextStatus);
+    if (nextRole !== role) setRole(nextRole);
+    if (nextJoinedFrom !== joinedFrom) setJoinedFrom(nextJoinedFrom);
+    if (nextJoinedTo !== joinedTo) setJoinedTo(nextJoinedTo);
+    if (nextPage !== page) setPage(nextPage);
+    if (nextGuildId && nextGuildId !== guildId && guilds.some((candidate) => candidate.id === nextGuildId)) {
+      setGuildId(nextGuildId);
+    }
+  }, [guildId, guilds, joinedFrom, joinedTo, page, role, search, searchParams, setGuildId, status]);
+  useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, role, status]);
+  }, [debouncedSearch, role, status, joinedFrom, joinedTo, guildId]);
+
+  // Drop previous tenant's rows immediately so the UI never shows stale data.
+  useEffect(() => {
+    const seed = getMembersForGuild(guildId);
+    setMembers(seed.slice(0, PAGE_SIZE));
+    setPagination({
+      ...emptyPage,
+      items: seed.slice(0, PAGE_SIZE),
+      total: seed.length,
+      hasNextPage: seed.length > PAGE_SIZE,
+    });
+    previousMembersRef.current = seed.slice(0, PAGE_SIZE);
+  }, [guildId]);
 
   useEffect(() => {
     let mounted = true;
@@ -73,9 +272,13 @@ export default function MembersPage() {
         if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
         if (status !== "all") params.set("status", status);
         if (role !== "all") params.set("role", role);
+        if (joinedFrom) params.set("joinedFrom", joinedFrom);
+        if (joinedTo) params.set("joinedTo", joinedTo);
 
-        const res = await fetch(`/api/members?${params.toString()}`);
-        const data = await readApiResult<PaginatedResult<MockMember>>(res);
+        const data = await dashboardQueryCache.fetchQuery(membersQueryKey, async () => {
+          const res = await guildFetch(`/api/members?${params.toString()}`, guildId);
+          return readApiResult<PaginatedResult<MockMember>>(res);
+        });
         if (!mounted) return;
 
         setMembers(data.items);
@@ -89,6 +292,7 @@ export default function MembersPage() {
           return;
         }
         console.warn("Falling back to mock members:", err);
+        // Keep guild-scoped seed data already applied on guild switch.
         setListState(apiMode === "live" ? "error" : "loaded");
       }
     }
@@ -97,11 +301,11 @@ export default function MembersPage() {
     return () => {
       mounted = false;
     };
-  }, [apiMode, debouncedSearch, page, role, status]);
+  }, [apiMode, cacheRevision, debouncedSearch, guildId, joinedFrom, joinedTo, membersQueryKey, page, role, status]);
 
-  const updateMutation = useOptimisticMutation<MockMember, { id: string; data: Partial<MockMember> }>({
+  const updateMutation = useOptimisticMutation<MockMember, { id: string; data: Partial<MockMember> & { version?: number } }>({
     mutationFn: async ({ id, data }) => {
-      const res = await fetch(`/api/members?id=${id}`, {
+      const res = await guildFetch(`/api/members?id=${id}`, guildId, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -123,6 +327,7 @@ export default function MembersPage() {
     },
     onSuccess: (updatedMember, { id }) => {
       setMembers((prev) => prev.map((m) => (m.id === id ? updatedMember : m)));
+      invalidateAfterMutation("member", guildId);
       setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -130,13 +335,17 @@ export default function MembersPage() {
       });
     },
     onError: (error) => {
-      alert(error.message);
+      if (error instanceof ApiClientError && error.code === "CONFLICT") {
+        alert("This member was updated elsewhere — refresh and retry.");
+      } else {
+        alert(error.message);
+      }
     },
   });
 
   const deleteMutation = useOptimisticMutation<{ success: boolean }, string>({
     mutationFn: async (id) => {
-      const res = await fetch(`/api/members?id=${id}`, { method: "DELETE" });
+      const res = await guildFetch(`/api/members?id=${id}`, guildId, { method: "DELETE" });
       return readApiResult<{ success: boolean }>(res);
     },
     onOptimisticUpdate: (id) => {
@@ -150,6 +359,7 @@ export default function MembersPage() {
     },
     onSuccess: (_data, id) => {
       setPagination((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      invalidateAfterMutation("member", guildId);
       setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -176,20 +386,27 @@ export default function MembersPage() {
   };
 
   const handleRolesChange = (id: string, roles: string[]) => {
+    const member = members.find((m) => m.id === id);
     // Errors are surfaced via onError (alert); avoid unhandled rejection
-    updateMutation.mutate({ id, data: { roles } }).catch(() => {});
+    updateMutation.mutate({ id, data: { roles, version: member?.version } }).catch(() => {});
   };
 
   const handleInvite = async () => {
     if (!form.name.trim()) return alert("Name is required");
-    if (!form.wallet.trim()) return alert("Wallet is required");
+
+    const normalizedWallet = tryNormaliseAddress(form.wallet);
+    if (!normalizedWallet) {
+      setWalletError("Enter a valid Ethereum wallet address (0x followed by 40 hex characters).");
+      return;
+    }
+    setWalletError(null);
 
     try {
       setInviteLoading(true);
-      const res = await fetch("/api/members", {
+      const res = await guildFetch("/api/members", guildId, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: form.name.trim(), wallet: form.wallet.trim() }),
+        body: JSON.stringify({ name: form.name.trim(), wallet: normalizedWallet }),
       });
       const newMember = await readApiResult<MockMember>(res);
       const safeMember = {
@@ -199,17 +416,41 @@ export default function MembersPage() {
       };
       setMembers((prev) => [safeMember, ...prev].slice(0, pagination.limit));
       setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+      invalidateAfterMutation("member", guildId);
       setIsInviteOpen(false);
       setForm({ name: "", wallet: "" });
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : "Failed to invite member.");
+      const walletFieldError =
+        error instanceof ApiClientError
+          ? error.fields?.find((field) => field.field === "wallet")?.message
+          : undefined;
+
+      if (walletFieldError) {
+        setWalletError(walletFieldError);
+      } else {
+        alert(error instanceof Error ? error.message : "Failed to invite member.");
+      }
     } finally {
       setInviteLoading(false);
     }
   };
 
+  const handleExportCsv = () => {
+    const csv = toMembersCsv(members);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "guildpass-members.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <DashboardLayout title="Members" session={session}>
+    <DashboardLayout title="Members" subtitle={guild ? `Scoped to ${guild.name}` : undefined} session={session}>
       {listState === "unsupported" && <UnsupportedBanner resource="members" />}
 
       {listState === "error" && (
@@ -225,58 +466,140 @@ export default function MembersPage() {
           {listState === "unsupported" ? "Member listing unavailable in live mode" : resultSummary}
         </p>
 
-        {canWrite && listState !== "unsupported" && (
-          <button
-            id="btn-invite-member"
-            onClick={() => setIsInviteOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700"
-          >
-            <span>+</span> Invite Member
-          </button>
+        {listState !== "unsupported" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              id="btn-export-members-csv"
+              onClick={handleExportCsv}
+              disabled={members.length === 0 || listState === "loading"}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Export CSV
+            </button>
+
+            {canWrite && (
+              <button
+                id="btn-invite-member"
+                onClick={() => setIsInviteOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700"
+              >
+                <span>+</span> Invite Member
+              </button>
+            )}
+          </div>
         )}
       </div>
 
       {listState !== "unsupported" && (
-        <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_180px_180px]">
-          <label className="block">
-            <span className="sr-only">Search members</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name or wallet"
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-            />
-          </label>
+        <div className="mb-4 space-y-3">
+          {/* Search + Status row */}
+          <div className="grid gap-3 lg:grid-cols-[1fr_220px_180px]">
+            <label className="block">
+              <span className="sr-only">Search members</span>
+              <input
+                value={search}
+                onChange={(event) => handleSearchChange(event.target.value)}
+                placeholder="Search by name or wallet"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+            </label>
+            <label className="block">
+              <span className="sr-only">Filter by guild</span>
+              <select
+                value={guildId}
+                onChange={(event) => handleGuildFilterChange(event.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              >
+                {guilds.map((guildOption) => (
+                  <option key={guildOption.id} value={guildOption.id}>
+                    {guildOption.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="block">
-            <span className="sr-only">Filter by status</span>
-            <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value as MemberStatusFilter)}
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-            >
-              <option value="all">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="pending">Pending</option>
-            </select>
-          </label>
+            <label className="block">
+              <span className="sr-only">Filter by status</span>
+              <select
+                value={status}
+                onChange={(event) => handleStatusChange(event.target.value as MemberStatusFilter)}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="pending">Pending</option>
+              </select>
+            </label>
+          </div>
 
-          <label className="block">
-            <span className="sr-only">Filter by role</span>
-            <select
-              value={role}
-              onChange={(event) => setRole(event.target.value as MemberRoleFilter)}
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+          {/* Role filter chips */}
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by role">
+            <span className="text-sm text-slate-500">Role:</span>
+            <button
+              type="button"
+              onClick={() => handleRoleChange("all")} 
+              aria-pressed={role === "all"}
+              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 ${
+                role === "all"
+                  ? "bg-violet-600 text-white border-violet-600"
+                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+              }`}
             >
-              <option value="all">All roles</option>
-              {MEMBER_ROLES.map((memberRole) => (
-                <option key={memberRole} value={memberRole}>
-                  {memberRole}
-                </option>
-              ))}
-            </select>
-          </label>
+              All
+            </button>
+            {MEMBER_ROLES.map((memberRole) => (
+              <button
+                key={memberRole}
+                type="button"
+                onClick={() => handleRoleChange(memberRole)}
+                aria-pressed={role === memberRole}
+                className={`rounded-full border px-3 py-1.5 text-sm font-medium capitalize transition-colors focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 ${
+                  role === memberRole
+                    ? "bg-violet-600 text-white border-violet-600"
+                    : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {memberRole}
+              </button>
+            ))}
+          </div>
+
+          {/* Join-date range row */}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              Joined from
+              <input
+                type="date"
+                value={joinedFrom}
+                max={joinedTo || undefined}
+                onChange={(event) => handleJoinedFromChange(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-500">
+              to
+              <input
+                type="date"
+                value={joinedTo}
+                min={joinedFrom || undefined}
+                onChange={(event) => handleJoinedToChange(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              />
+            </label>
+            {(joinedFrom || joinedTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleJoinedFromChange("");
+                  handleJoinedToChange("");
+                }}
+                className="text-sm font-medium text-violet-600 hover:text-violet-700"
+              >
+                Clear dates
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -286,10 +609,33 @@ export default function MembersPage() {
             <h2 className="mb-4 text-lg font-semibold text-slate-900">Invite Member</h2>
             <div className="space-y-3">
               <input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full rounded-lg border border-slate-200 p-2" />
-              <input placeholder="Wallet" value={form.wallet} onChange={(e) => setForm({ ...form, wallet: e.target.value })} className="w-full rounded-lg border border-slate-200 p-2" />
+              <div>
+                <input
+                  placeholder="Wallet"
+                  value={form.wallet}
+                  onChange={(e) => {
+                    setForm({ ...form, wallet: e.target.value });
+                    if (walletError) setWalletError(null);
+                  }}
+                  aria-invalid={walletError ? true : undefined}
+                  aria-describedby={walletError ? "invite-wallet-error" : undefined}
+                  className={`w-full rounded-lg border p-2 ${walletError ? "border-red-400" : "border-slate-200"}`}
+                />
+                {walletError && (
+                  <p id="invite-wallet-error" className="mt-1 text-xs text-red-600">
+                    {walletError}
+                  </p>
+                )}
+              </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setIsInviteOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700">
+              <button
+                onClick={() => {
+                  setIsInviteOpen(false);
+                  setWalletError(null);
+                }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+              >
                 Cancel
               </button>
               <button
@@ -328,7 +674,7 @@ export default function MembersPage() {
                           {member.name}
                           {isPending && <span className="ml-2 text-xs text-slate-400">(updating...)</span>}
                         </td>
-                        <td className="px-6 py-4 font-mono text-sm text-slate-600">{member.wallet.slice(0, 6)}...{member.wallet.slice(-4)}</td>
+                        <td className="px-6 py-4"><WalletAddressText address={member.wallet} /></td>
                         <td className="px-6 py-4"><StatusBadge status={member.status} /></td>
                         <td className="px-6 py-4 text-slate-600">
                           <RoleEditor roles={member.roles ?? []} disabled={!canWrite || isPending} onChange={(roles) => handleRolesChange(member.id, roles)} />
@@ -351,7 +697,7 @@ export default function MembersPage() {
 
           {members.length === 0 && (
             <div className="mt-4">
-              <EmptyState title="No members match your filters" description="Adjust the search, status, or role filter to see more members." icon="-" />
+              <EmptyState title="No members match your filters" description="Adjust the search, guild, status, role, or join date filters to see more members." icon="-" />
             </div>
           )}
 
@@ -359,38 +705,12 @@ export default function MembersPage() {
             page={pagination.page}
             hasPreviousPage={pagination.hasPreviousPage}
             hasNextPage={pagination.hasNextPage}
-            onPrevious={() => setPage((current) => Math.max(1, current - 1))}
-            onNext={() => setPage((current) => current + 1)}
+            onPrevious={() => handlePageChange(page - 1)}
+            onNext={() => handlePageChange(page + 1)}
           />
         </>
       )}
     </DashboardLayout>
-  );
-}
-
-function PaginationControls({
-  page,
-  hasPreviousPage,
-  hasNextPage,
-  onPrevious,
-  onNext,
-}: {
-  page: number;
-  hasPreviousPage: boolean;
-  hasNextPage: boolean;
-  onPrevious: () => void;
-  onNext: () => void;
-}) {
-  return (
-    <div className="mt-4 flex items-center justify-between">
-      <button onClick={onPrevious} disabled={!hasPreviousPage} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
-        Previous
-      </button>
-      <span className="text-sm text-slate-500">Page {page}</span>
-      <button onClick={onNext} disabled={!hasNextPage} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
-        Next
-      </button>
-    </div>
   );
 }
 
@@ -403,4 +723,12 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [delayMs, value]);
 
   return debounced;
+}
+
+export default function MembersPage() {
+  return (
+    <Suspense fallback={<div>Loading members...</div>}>
+      <MembersPageContent />
+    </Suspense>
+  );
 }

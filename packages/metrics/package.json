@@ -1,0 +1,8 @@
+{
+  "name": "@guildpass/metrics",
+  "version": "0.1.0",
+  "main": "./index.ts",
+  "dependencies": {
+    "prom-client": "^15.1.0"
+  }
+}

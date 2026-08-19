@@ -1,24 +1,24 @@
 import type { NextResponse } from "next/server";
 import {
-  apiError,
-  apiResponse,
-  apiUnsupported,
-  apiValidationError,
-  handleApiError,
+apiError,
+apiResponse,
+apiUnsupported,
+apiValidationError,
+handleApiError,
 } from "@/lib/api-helpers";
 import { NotFoundError } from "@/lib/api-errors";
 import { mockMembers, type Member } from "@/lib/mock-data";
-import { requireDashboardSession, UnauthorizedError } from "@/lib/auth/server-session";
-import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
+import { getActiveGuildId } from "@/lib/guild-context";
+import { requireSessionAndPermission } from "@/lib/auth/require-permission";
 import { IntegrationClient } from "@guildpass/integration-client";
-import { getEnv, getApiMode } from "@/lib/env";
+import { validateLiveModeEnv, getApiMode } from "@/lib/env";
 import { getMemberRepository } from "@/lib/repositories/factory";
 import { filterMembers, paginateItems, parseListLimit, parseListPage } from "@/lib/pagination";
 import type { MemberListQuery } from "@/lib/repositories/types";
 import {
-  malformedPayloadError,
-  validateMemberCreatePayload,
-  validateMemberUpdatePayload,
+malformedPayloadError,
+validateMemberCreatePayload,
+validateMemberUpdatePayload,
 } from "@/lib/validation/mutations";
 import { recordDashboardActivity } from "@/lib/activity/dashboard";
 import { isMemberRole } from "@/lib/member-roles";
@@ -33,14 +33,28 @@ export async function GET(request: Request): Promise<NextResponse> {
     const query = parseMemberListQuery(request);
 
     if (apiMode === "live") {
+      // Live mode only supports direct lookups; a bare list request is
+      // unsupported — reject it before constructing a client we won't use.
+      if (!wallet && !discordUserId) {
+        return apiUnsupported(
+          "members.list",
+          apiMode,
+          "Live mode requires a lookup (wallet or discordUserId)"
+        );
+      }
+
       const testClient = (globalThis as any).__TEST_INTEGRATION_CLIENT;
-      const env = testClient ? null : getEnv();
-      const client =
-        testClient ??
-        new IntegrationClient({
-          baseUrl: env!.GUILD_PASS_CORE_URL as string,
-          apiKey: env!.GUILD_PASS_CORE_API_KEY,
+      let client;
+
+      if (testClient) {
+        client = testClient;
+      } else {
+        const liveEnv = validateLiveModeEnv();
+        client = new IntegrationClient({
+          baseUrl: liveEnv.GUILD_PASS_CORE_URL,
+          apiKey: liveEnv.GUILD_PASS_CORE_API_KEY,
         });
+      }
 
       try {
         if (wallet) {
@@ -48,12 +62,14 @@ export async function GET(request: Request): Promise<NextResponse> {
           if (!m) return apiResponse([], { status: 200 });
           const mapped: Member = {
             id: m.userId,
+            guildId: getActiveGuildId(request),
             wallet: m.wallet ?? "",
             name: m.userId,
             status: m.status === "unknown" ? "pending" : m.status,
             roles: m.roles ?? [],
             joinedAt: m.updatedAt,
             lastActive: m.updatedAt,
+            version: 1,
           };
           return apiResponse([mapped]);
         }
@@ -63,12 +79,14 @@ export async function GET(request: Request): Promise<NextResponse> {
           if (!m) return apiResponse([], { status: 200 });
           const mapped: Member = {
             id: m.userId,
+            guildId: getActiveGuildId(request),
             wallet: m.wallet ?? "",
             name: m.userId,
             status: m.status === "unknown" ? "pending" : m.status,
             roles: m.roles ?? [],
             joinedAt: m.updatedAt,
             lastActive: m.updatedAt,
+            version: 1,
           };
           return apiResponse([mapped]);
         }
@@ -86,10 +104,10 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     try {
       const memberRepository = getMemberRepository();
-      return apiResponse(await memberRepository.query(query));
+      return apiResponse(await memberRepository.query(getActiveGuildId(request), query));
     } catch (error) {
       console.error("Error fetching members:", error);
-      return apiResponse(getFallbackMembers(query));
+      return apiResponse(getFallbackMembers(request, query));
     }
   });
 }
@@ -105,6 +123,8 @@ function parseMemberListQuery(request: Request): MemberListQuery {
     search: searchParams.get("search") ?? undefined,
     status: isMemberStatus(status) ? status : "all",
     role: role && isMemberRole(role) ? role : "all",
+    joinedFrom: searchParams.get("joinedFrom") ?? undefined,
+    joinedTo: searchParams.get("joinedTo") ?? undefined,
     limit: parseListLimit(searchParams.get("limit")),
     page: parseListPage(searchParams.get("page")),
     cursor: searchParams.get("cursor"),
@@ -115,25 +135,17 @@ function isMemberStatus(value: string | null): value is Member["status"] {
   return value !== null && MEMBER_STATUSES.includes(value as Member["status"]);
 }
 
-function getFallbackMembers(query: MemberListQuery) {
-  const filtered = filterMembers(mockMembers, query);
+function getFallbackMembers(request: Request, query: MemberListQuery) {
+  const guildId = getActiveGuildId(request);
+  const scoped = mockMembers.filter((member) => member.guildId === guildId);
+  const filtered = filterMembers(scoped, query);
   return paginateItems(filtered, query);
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  let session;
-  try {
-    session = requireDashboardSession(request);
-    assertPermission(session, "members:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
-    }
-    if (err instanceof UnauthorizedError) {
-      return apiError(err.message, 401);
-    }
-    throw err;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "members:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   return handleApiError(async () => {
     let body: unknown;
@@ -149,30 +161,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const memberRepository = getMemberRepository();
-    const created = await memberRepository.create(validation.data);
-    await recordDashboardActivity({
+    const guildId = getActiveGuildId(request);
+    const created = await memberRepository.create(guildId, validation.data);
+    await recordDashboardActivity(guildId, {
       type: "member.joined",
       entity: { type: "member", id: created.id, name: created.name },
-      actor: { id: session!.userId, name: session!.name },
+      actor: { id: session.userId, name: session.name },
     });
     return created;
   });
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  let session;
-  try {
-    session = requireDashboardSession(request);
-    assertPermission(session, "members:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
-    }
-    if (err instanceof UnauthorizedError) {
-      return apiError(err.message, 401);
-    }
-    throw err;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "members:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -197,15 +200,17 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     }
 
     const memberRepository = getMemberRepository();
-    const existing = validation.data.roles ? await memberRepository.getById(id) : null;
-    const updated = await memberRepository.update(id, validation.data);
+    const guildId = getActiveGuildId(request);
+    const { version: expectedVersion, ...updateData } = validation.data;
+    const existing = validation.data.roles ? await memberRepository.getById(guildId, id) : null;
+    const updated = await memberRepository.update(guildId, id, updateData, expectedVersion);
     if (!updated) throw new NotFoundError("Member not found.");
     const rolesChanged = existing && validation.data.roles && JSON.stringify(existing.roles) !== JSON.stringify(validation.data.roles);
     if (rolesChanged) {
-      await recordDashboardActivity({
+      await recordDashboardActivity(guildId, {
         type: "member.roles_changed",
         entity: { type: "member", id: updated.id, name: updated.name },
-        actor: { id: session!.userId, name: session!.name },
+        actor: { id: session.userId, name: session.name },
       });
     }
     return updated;
@@ -213,19 +218,9 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  let session;
-  try {
-    session = requireDashboardSession(request);
-    assertPermission(session, "members:write");
-  } catch (err) {
-    if (err instanceof PermissionDeniedError) {
-      return apiError(err.message, 403);
-    }
-    if (err instanceof UnauthorizedError) {
-      return apiError(err.message, 401);
-    }
-    throw err;
-  }
+  const guard = await requireSessionAndPermission(request, getActiveGuildId(request), "members:write");
+  if (!guard.ok) return guard.response;
+  const { session } = guard;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -238,14 +233,15 @@ export async function DELETE(request: Request): Promise<NextResponse> {
 
   return handleApiError(async () => {
     const memberRepository = getMemberRepository();
-    const member = await memberRepository.getById(id);
+    const guildId = getActiveGuildId(request);
+    const member = await memberRepository.getById(guildId, id);
     if (!member) throw new NotFoundError("Member not found.");
-    const success = await memberRepository.delete(id);
+    const success = await memberRepository.delete(guildId, id);
     if (!success) throw new NotFoundError("Member not found.");
-    await recordDashboardActivity({
+    await recordDashboardActivity(guildId, {
       type: "member.left",
       entity: { type: "member", id: member.id, name: member.name },
-      actor: { id: session!.userId, name: session!.name },
+      actor: { id: session.userId, name: session.name },
     });
     return { success: true };
   });

@@ -1,8 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { WEBHOOK_FIXTURES, makeWebhookPayload } from "./fixtures.ts";
-import type { ActivityEvent } from "../lib/activity/types.ts";
-import type { WebhookPayload } from "../lib/activity/types.ts";
+import { WEBHOOK_FIXTURES, makeWebhookPayload } from "./fixtures";
+import type { ActivityEvent, WebhookPayload } from "../lib/activity/types";
+import { CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
 
 /**
  * webhook-mapper.test.ts
@@ -39,6 +39,7 @@ function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | null {
         timestamp,
         entity: { type: "member", id: entityId, name },
         metadata: data,
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     case "membership.updated":
       return {
@@ -51,6 +52,7 @@ function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | null {
         timestamp,
         entity: { type: "member", id: entityId, name },
         metadata: data,
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     case "pass.created":
       return {
@@ -63,6 +65,7 @@ function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | null {
         timestamp,
         entity: { type: "pass", id: entityId, name },
         metadata: data,
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     case "pass.updated":
       return {
@@ -75,6 +78,7 @@ function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | null {
         timestamp,
         entity: { type: "pass", id: entityId, name },
         metadata: data,
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     case "guild.updated":
       return {
@@ -87,6 +91,7 @@ function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | null {
         timestamp,
         entity: { type: "guild", id: entityId, name },
         metadata: data,
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     case "verification.completed":
       return {
@@ -99,6 +104,7 @@ function mapWebhookToActivity(payload: WebhookPayload): ActivityEvent | null {
         timestamp,
         entity: { type: "verification", id: entityId },
         metadata: data,
+        schemaVersion: CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
       };
     default:
       return null;
@@ -148,8 +154,8 @@ describe("mapWebhookToActivity", () => {
     });
 
     test("sets actor name and wallet from payload data", () => {
-      assert.equal(result.actor.name, payload.data.name);
-      assert.equal(result.actor.wallet, payload.data.wallet);
+      assert.equal(result.actor.name, payload.data.name!);
+      assert.equal(result.actor.wallet, payload.data.wallet!);
     });
 
     test("description includes member name when present", () => {
@@ -174,7 +180,7 @@ describe("mapWebhookToActivity", () => {
 
     test("entity type is 'member'", () => {
       assert.equal(result.entity?.type, "member");
-      assert.equal(result.entity?.id, payload.data.id);
+      assert.equal(result.entity?.id, payload.data.id!);
     });
 
     test("metadata equals raw payload data", () => {
@@ -233,7 +239,7 @@ describe("mapWebhookToActivity", () => {
 
     test("entity type is 'pass'", () => {
       assert.equal(result.entity?.type, "pass");
-      assert.equal(result.entity?.name, payload.data.name);
+      assert.equal(result.entity?.name, payload.data.name!);
     });
   });
 
@@ -299,7 +305,7 @@ describe("mapWebhookToActivity", () => {
     });
 
     test("actor.wallet is set from payload data.wallet", () => {
-      assert.equal(result.actor.wallet, payload.data.wallet);
+      assert.equal(result.actor.wallet, payload.data.wallet!);
     });
 
     test("description includes wallet address", () => {
@@ -308,7 +314,7 @@ describe("mapWebhookToActivity", () => {
 
     test("entity type is 'verification' and id equals wallet", () => {
       assert.equal(result.entity?.type, "verification");
-      assert.equal(result.entity?.id, payload.data.wallet);
+      assert.equal(result.entity?.id, payload.data.wallet!);
     });
   });
 

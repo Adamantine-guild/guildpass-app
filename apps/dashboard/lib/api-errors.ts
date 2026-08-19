@@ -59,6 +59,14 @@ export class NotFoundError extends PublicApiError {
   }
 }
 
+/** 409 — the request conflicts with the current server state (e.g. version mismatch). */
+export class ConflictError extends PublicApiError {
+  constructor(message = "This resource was updated elsewhere — refresh and retry.") {
+    super(message, 409);
+    this.name = "ConflictError";
+  }
+}
+
 /**
  * Type guard: does this value carry a client-safe message + status?
  * Accepts `PublicApiError` and any other error that opts in with the same
