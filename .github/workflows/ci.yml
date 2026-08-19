@@ -28,9 +28,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
       - name: Install dependencies
+        # No lockfile is tracked (lock files are gitignored), so pnpm resolves
+        # versions from the workspace manifests.
         run: pnpm install
 
       - name: Lint

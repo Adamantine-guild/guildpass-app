@@ -279,21 +279,50 @@ export class IndexerCore {
     }
   }
 
-  private async applyEventApplication(decoded: any, tx: any) {
+  private async applyEventApplication(
+    decoded: any,
+    tx: any,
+  ): Promise<{ wallet: string; passId: string; status: number } | undefined> {
     const { eventName, args } = decoded;
 
     if (eventName === MEMBERSHIP_EVENTS.MembershipCreated) {
+      const previous = await tx.membership.findUnique({
+        where: { wallet_passId: { wallet: args.member, passId: args.passId } },
+      });
       await tx.membership.upsert({
         where: { wallet_passId: { wallet: args.member, passId: args.passId } },
         update: { status: 1 },
         create: { wallet: args.member, passId: args.passId, status: 1 },
       });
-    } else if (eventName === MEMBERSHIP_EVENTS.MembershipUpdated) {
+      // Snapshot the pre-application state so a reorg can roll back exactly
+      // (passId is BigInt in the DB, so serialise it for JSON storage).
+      return previous
+        ? {
+            wallet: previous.wallet,
+            passId: previous.passId.toString(),
+            status: previous.status,
+          }
+        : undefined;
+    }
+
+    if (eventName === MEMBERSHIP_EVENTS.MembershipUpdated) {
+      const previous = await tx.membership.findUnique({
+        where: { wallet_passId: { wallet: args.member, passId: args.passId } },
+      });
       await tx.membership.update({
         where: { wallet_passId: { wallet: args.member, passId: args.passId } },
         data: { status: args.newStatus },
       });
+      return previous
+        ? {
+            wallet: previous.wallet,
+            passId: previous.passId.toString(),
+            status: previous.status,
+          }
+        : undefined;
     }
+
+    return undefined;
   }
 
   private async revertEventApplication(event: any, tx: any) {

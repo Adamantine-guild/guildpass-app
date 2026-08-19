@@ -17,6 +17,7 @@ model ProcessedEvent {
   status          String   @default("processed") // e.g., processed, reverted
   eventType       String
   data            Json
+  previousState   Json?    // pre-application state snapshot (used for exact rollback)
   fencingToken    Int      @default(0) // Monotonically increasing leader generation
   createdAt       DateTime @default(now())
 
@@ -24,6 +25,23 @@ model ProcessedEvent {
   @@index([contractAddress])
   @@index([blockNumber])
   @@index([blockHash])
+}
+
+/// Dead-letter queue: logs that failed processing, retryable via the backfill CLI.
+model FailedEvent {
+  id              String   @id @default(uuid())
+  contractAddress String
+  blockHash       String
+  blockNumber     BigInt
+  transactionHash String
+  logIndex        Int
+  eventType       String
+  error           String
+  data            Json
+  retryCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([contractAddress])
 }
 
 
