@@ -6,6 +6,7 @@ dist
 .docusaurus
 build
 coverage
+.tsbuildinfo
 packages/*/dist
 apps/*/dist
 apps/docs/.docusaurus

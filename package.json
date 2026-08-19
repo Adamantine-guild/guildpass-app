@@ -10,7 +10,8 @@
   ],
   "scripts": {
     "dev": "pnpm --filter @guildpass/dashboard dev",
-    "build": "pnpm --filter @guildpass/dashboard build",
+    "build": "tsc -b",
+    "build:clean": "rm -rf dist .tsbuildinfo && tsc -b",
     "start": "pnpm --filter @guildpass/dashboard start",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
