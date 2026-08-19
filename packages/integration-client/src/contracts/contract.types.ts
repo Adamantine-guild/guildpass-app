@@ -18,4 +18,4 @@ export interface JsonRpcResponse<T = any> {
   id: number | string;
 }
 
-export interface ContractCallOptions extends HttpRequestOptions {}
+export type ContractCallOptions = HttpRequestOptions;

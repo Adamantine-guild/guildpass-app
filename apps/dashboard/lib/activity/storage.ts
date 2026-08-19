@@ -1,8 +1,9 @@
 import { mkdir, open, readFile, appendFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ActivityEvent } from "./types";
-import { ActivityQuery, ActivityQueryResult, filterActivityEvents } from "./query";
+import type { ActivityEvent } from "./types";
+import type { ActivityQuery, ActivityQueryResult } from "./query";
+import { filterActivityEvents } from "./query";
 import { type Activity, mockActivity } from "../mock-data";
 
 /**

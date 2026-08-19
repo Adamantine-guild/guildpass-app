@@ -129,7 +129,8 @@ export function useApiList<T>({
 
   useEffect(() => {
     mountedRef.current = true;
-    fetchData();
+    // fetchData handles its own errors (state fallback), so no await needed
+    void fetchData();
     return () => {
       mountedRef.current = false;
     };

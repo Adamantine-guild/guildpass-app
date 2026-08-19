@@ -129,7 +129,7 @@ export default function ActivityPage() {
         </div>
         <button
           type="button"
-          onClick={refresh}
+          onClick={() => void refresh()}
           disabled={refreshing}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           title="Fetch the latest activity events"
@@ -280,7 +280,7 @@ export default function ActivityPage() {
               <div className="border-t border-slate-100 px-6 py-4 text-center">
                 <button
                   type="button"
-                  onClick={loadMore}
+                  onClick={() => void loadMore()}
                   disabled={loadingMore}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >

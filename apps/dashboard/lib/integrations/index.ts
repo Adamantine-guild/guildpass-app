@@ -1,4 +1,4 @@
-import { IntegrationAdapter, IntegrationDetails } from "./types";
+import type { IntegrationAdapter, IntegrationDetails } from "./types";
 import { DiscordMockAdapter } from "./discord-mock-adapter";
 import { DiscordLiveAdapter } from "./discord-live-adapter";
 

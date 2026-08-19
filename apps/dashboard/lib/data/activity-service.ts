@@ -1,5 +1,5 @@
-import { ActivityEvent } from "@guildpass/integration-client";
-import { ActivityQuery, ActivityQueryResult } from "../activity/query";
+import type { ActivityEvent } from "@guildpass/integration-client";
+import type { ActivityQuery, ActivityQueryResult } from "../activity/query";
 import { activityStorage } from "../activity/storage";
 
 export interface ActivityStats {

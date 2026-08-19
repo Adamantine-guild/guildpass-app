@@ -1,6 +1,7 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { getServerComponentSession } from "@/lib/auth/server-session";
-import { getIntegrationsList, IntegrationStatus } from "@/lib/integrations";
+import type { IntegrationStatus } from "@/lib/integrations";
+import { getIntegrationsList } from "@/lib/integrations";
 import AccessDenied from "@/components/AccessDenied";
 import { hasRole } from "@/lib/permissions";
 

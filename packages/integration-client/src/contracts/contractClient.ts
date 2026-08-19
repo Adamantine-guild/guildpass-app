@@ -1,4 +1,4 @@
-import { HttpClient } from "../http/httpClient.js";
+import type { HttpClient } from "../http/httpClient.js";
 import type { ContractCallOptions, JsonRpcRequest, JsonRpcResponse } from "./contract.types.js";
 
 export class ContractClient {

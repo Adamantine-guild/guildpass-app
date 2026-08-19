@@ -1,4 +1,4 @@
-import { IntegrationAdapter, IntegrationDetails, IntegrationStatus } from "./types";
+import type { IntegrationAdapter, IntegrationDetails, IntegrationStatus } from "./types";
 
 /**
  * Live adapter for the Discord Bot integration.

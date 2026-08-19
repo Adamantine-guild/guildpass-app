@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { verifySignature } from "@guildpass/webhook-utils";
 import { getEnv } from "@/lib/env";
 import { mapWebhookToActivity } from "@/lib/activity/mapper";

@@ -7,7 +7,8 @@
  * IMPORTANT: Use express.raw() middleware to preserve the raw body.
  */
 
-import express, { Request, Response } from "express";
+import express from "express";
+import type { Request, Response } from "express";
 import { verifySignature } from "@guildpass/webhook-utils";
 
 const app = express();

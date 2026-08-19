@@ -135,7 +135,7 @@ export function verifySignature(opts: VerifyOptions): VerifyResult {
     }
 
     return { valid: true, timestamp };
-  } catch (err) {
+  } catch {
     return {
       valid: false,
       error: "Signature comparison failed",

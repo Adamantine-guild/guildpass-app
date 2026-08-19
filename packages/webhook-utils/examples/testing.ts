@@ -267,7 +267,7 @@ test.describe('Webhook Integration', () => {
 
 // Run tests if executed directly
 if (require.main === module) {
-  (async () => {
+  void (async () => {
     console.log("Running webhook tests...\n");
 
     testVerificationLogic();

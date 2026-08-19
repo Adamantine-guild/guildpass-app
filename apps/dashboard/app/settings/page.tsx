@@ -61,7 +61,7 @@ export default function SettingsPage() {
       }
     }
 
-    loadSettings();
+    void loadSettings();
     return () => {
       active = false;
     };
@@ -96,9 +96,10 @@ export default function SettingsPage() {
     }
   });
 
-  async function handleSave(e: React.FormEvent) {
+  function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    saveMutation.mutate({ workspaceName, timezone, displayName, email });
+    // Errors are surfaced via onError (alert); avoid unhandled rejection
+    saveMutation.mutate({ workspaceName, timezone, displayName, email }).catch(() => {});
   }
 
   return (

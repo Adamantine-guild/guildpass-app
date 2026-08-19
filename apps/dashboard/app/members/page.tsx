@@ -93,7 +93,7 @@ export default function MembersPage() {
       }
     }
 
-    load();
+    void load();
     return () => {
       mounted = false;
     };
@@ -170,12 +170,42 @@ export default function MembersPage() {
 
   const handleRemove = (id: string) => {
     if (confirm("Are you sure you want to remove this member?")) {
-      deleteMutation.mutate(id);
+      // Errors are surfaced via onError (alert); avoid unhandled rejection
+      deleteMutation.mutate(id).catch(() => {});
     }
   };
 
   const handleRolesChange = (id: string, roles: string[]) => {
-    updateMutation.mutate({ id, data: { roles } });
+    // Errors are surfaced via onError (alert); avoid unhandled rejection
+    updateMutation.mutate({ id, data: { roles } }).catch(() => {});
+  };
+
+  const handleInvite = async () => {
+    if (!form.name.trim()) return alert("Name is required");
+    if (!form.wallet.trim()) return alert("Wallet is required");
+
+    try {
+      setInviteLoading(true);
+      const res = await fetch("/api/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: form.name.trim(), wallet: form.wallet.trim() }),
+      });
+      const newMember = await readApiResult<MockMember>(res);
+      const safeMember = {
+        ...newMember,
+        roles: newMember.roles ?? [],
+        status: newMember.status ?? "pending",
+      };
+      setMembers((prev) => [safeMember, ...prev].slice(0, pagination.limit));
+      setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+      setIsInviteOpen(false);
+      setForm({ name: "", wallet: "" });
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : "Failed to invite member.");
+    } finally {
+      setInviteLoading(false);
+    }
   };
 
   return (
@@ -265,33 +295,7 @@ export default function MembersPage() {
               <button
                 disabled={inviteLoading}
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                onClick={async () => {
-                  if (!form.name.trim()) return alert("Name is required");
-                  if (!form.wallet.trim()) return alert("Wallet is required");
-
-                  try {
-                    setInviteLoading(true);
-                    const res = await fetch("/api/members", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: form.name.trim(), wallet: form.wallet.trim() }),
-                    });
-                    const newMember = await readApiResult<MockMember>(res);
-                    const safeMember = {
-                      ...newMember,
-                      roles: newMember.roles ?? [],
-                      status: newMember.status ?? "pending",
-                    };
-                    setMembers((prev) => [safeMember, ...prev].slice(0, pagination.limit));
-                    setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
-                    setIsInviteOpen(false);
-                    setForm({ name: "", wallet: "" });
-                  } catch (error: any) {
-                    alert(error.message);
-                  } finally {
-                    setInviteLoading(false);
-                  }
-                }}
+                onClick={() => void handleInvite()}
               >
                 {inviteLoading ? "Inviting..." : "Invite"}
               </button>

@@ -1,4 +1,4 @@
-import { test, describe, beforeEach } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { MembershipIndexer } from "../src/workers/indexer.js";
 

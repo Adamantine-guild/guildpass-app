@@ -68,7 +68,7 @@ export default function DashboardPage() {
       }
     }
 
-    load();
+    void load();
     return () => {
       mounted = false;
     };
@@ -120,7 +120,7 @@ export default function DashboardPage() {
               <LastUpdated date={lastUpdated} autoRefresh={intervalMs > 0} />
             </div>
             <button
-              onClick={refresh}
+              onClick={() => void refresh()}
               disabled={refreshing}
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               title="Refresh recent activity"
