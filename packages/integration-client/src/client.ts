@@ -10,6 +10,7 @@ import { ContractClient } from "./contracts/contractClient.js";
 import type { HttpRequestOptions } from "./http/http.types.js";
 import { CircuitOpenError } from "./http/circuitBreaker.js";
 import { TimeoutError, UpstreamError, NetworkError } from "./http/errors.js";
+import { MembershipService } from "./membership/membership.service.js";
 
 // Re-export typed errors so callers can import them from @guildpass/integration-client
 export { CircuitOpenError, TimeoutError, UpstreamError, NetworkError };
@@ -47,6 +48,7 @@ function headers(apiKey?: string) {
  * ```
  */
 export class IntegrationClient {
+  readonly membership: MembershipService;
   private baseUrl: string;
   private apiKey?: string;
   private httpClient: HttpClient;
@@ -66,6 +68,11 @@ export class IntegrationClient {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.apiKey = opts.apiKey;
     this.httpClient = new HttpClient(opts.transport);
+    this.membership = new MembershipService(
+      this.baseUrl,
+      this.apiKey,
+      this.httpClient,
+    );
   }
 
   /**
