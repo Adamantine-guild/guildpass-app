@@ -2,184 +2,130 @@
 
 This directory contains Next.js API route handlers for the GuildPass dashboard.
 
-## Existing Routes
+---
 
-### Activity Feed
-- **GET** `/api/activity` - Fetch recent activity events
-- **GET** `/api/activity/verify` - Verify the global durable PostgreSQL activity hash chain (owner/admin; `guilds:write`)
+## Route Reference
+
+### Activity
+
+| Method | Route | Permission | Description |
+|--------|-------|------------|-------------|
+| GET | `/api/activity` | `guilds:read` | Fetch recent activity events |
+| GET | `/api/activity/stream` | `guilds:read` | SSE stream for live activity updates |
+| GET | `/api/activity/verify` | `guilds:write` (owner/admin) | Verify the global durable PostgreSQL activity hash chain |
+
+### Authentication
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET/POST | `/api/auth/nonce` | Generate a sign-in nonce |
+| POST | `/api/auth/signin` | Sign in with wallet signature |
+| POST | `/api/auth/refresh` | Refresh an access token |
+| POST | `/api/auth/revoke` | Revoke an access token |
 
 ### Guilds
-- **GET** `/api/guilds` - List guilds and their metadata
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET/POST/PATCH/DELETE | `/api/guilds` | Guild CRUD operations |
+
+### Integrations
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/integrations` | List integrations and their status |
+| POST | `/api/integrations/reconcile` | Trigger a core reconciliation run |
 
 ### Members
-- **GET** `/api/members` - List guild members
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET/POST/PATCH/DELETE | `/api/members` | Member CRUD operations |
+| GET | `/api/members/export` | Export members as CSV |
 
 ### Passes
-- **GET** `/api/passes` - List guild passes
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET/POST/PATCH/DELETE | `/api/passes` | Pass CRUD operations |
+
+### Settings
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET/PATCH | `/api/settings` | Read and update dashboard settings |
 
 ### Verification
-- **POST** `/api/verify` - Verify user credentials
 
-## Adding Webhook Support
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/verify` | Verify a wallet signature |
+| POST | `/api/verify/challenge` | Issue a verification challenge |
 
-To receive webhooks from GuildPass integrations, you can add a webhook endpoint using the `@guildpass/webhook-utils` package for secure signature verification.
+### Webhooks
 
-### Example: Webhook Endpoint
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/webhooks` | Receive and process signed GuildPass webhook events |
 
-Create a new route at `app/api/webhooks/guildpass/route.ts`:
+### Admin
 
-```typescript
-import { verifySignature } from "@guildpass/webhook-utils";
-import { apiError, apiResponse } from "@/lib/api-helpers";
+| Method | Route | Permission | Description |
+|--------|-------|------------|-------------|
+| POST | `/api/admin/reconcile` | Admin only | Admin-level guild count reconciliation |
 
-export async function POST(request: Request) {
-  // 1. Get raw body (CRITICAL: before parsing)
-  const rawBody = await request.text();
-  
-  // 2. Get signature header
-  const signature = request.headers.get('x-guildpass-signature');
-  
-  if (!signature) {
-    return apiError('Missing signature', 401);
-  }
-  
-  // 3. Verify signature
-  const result = verifySignature({
-    signatureHeader: signature,
-    secret: process.env.WEBHOOK_SECRET!,
-    payload: rawBody,
-    tolerance: 300, // 5 minutes
-  });
-  
-  if (!result.valid) {
-    console.error('Webhook verification failed:', result.error);
-    return apiError('Invalid signature', 401);
-  }
-  
-  // 4. Process the verified webhook
-  const event = JSON.parse(rawBody);
-  
-  switch (event.type) {
-    case 'member.joined':
-      // Handle member joined event
-      break;
-    case 'pass.activated':
-      // Handle pass activated event
-      break;
-    // Add more event types as needed
-  }
-  
-  return apiResponse({ received: true });
-}
-```
+### Health
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/health` | Health check endpoint |
+| GET | `/api/metrics` | Application metrics |
+
+---
+
+## Webhook Endpoint
+
+The `/api/webhooks` route is already implemented and handles incoming GuildPass events. It:
+
+1. Rejects oversized payloads before any verification work
+2. Rate-limits sources that repeatedly fail verification
+3. Verifies the `x-guildpass-signature` header using `@guildpass/webhook-utils`
+4. Validates and maps the payload to a dashboard activity event
+5. Stores the event and publishes it to the SSE stream
 
 ### Configuration
 
-1. **Add webhook secret to environment variables:**
+Set the webhook secret in `.env.local`:
 
-   ```bash
-   # .env.local
-   WEBHOOK_SECRET=whsec_your_secret_from_guildpass_dashboard
-   ```
-
-2. **Install the webhook utilities package:**
-
-   The package is already part of the monorepo workspace. If you need to add it as a dependency:
-
-   ```json
-   // apps/dashboard/package.json
-   {
-     "dependencies": {
-       "@guildpass/webhook-utils": "workspace:*"
-     }
-   }
-   ```
-
-3. **Update environment type definitions:**
-
-   ```typescript
-   // lib/env.ts
-   declare global {
-     namespace NodeJS {
-       interface ProcessEnv {
-         WEBHOOK_SECRET: string;
-         // ... other env vars
-       }
-     }
-   }
-   ```
-
-### Security Best Practices
-
-1. **Always use raw body** - The signature is computed on the exact bytes received
-2. **Set appropriate tolerance** - Default is 300 seconds (5 minutes)
-3. **Never expose the secret** - Always use environment variables
-4. **Log verification failures** - Monitor for potential attacks
-5. **Use HTTPS only** - Webhooks should only be received over HTTPS
-
-### Testing Webhooks
-
-For testing, use the `generateSignature` utility:
-
-```typescript
-import { generateSignature } from '@guildpass/webhook-utils';
-
-const payload = JSON.stringify({ event: 'test' });
-const { signature } = generateSignature({
-  secret: process.env.WEBHOOK_SECRET,
-  payload,
-});
-
-// Use signature in test request
-await fetch('http://localhost:3000/api/webhooks/guildpass', {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    'x-guildpass-signature': signature,
-  },
-  body: payload,
-});
+```env
+WEBHOOK_SECRET=your_secret_here
 ```
 
-### Additional Resources
+### Supported Event Types
 
-- [Webhook Utils Package Documentation](../../../packages/webhook-utils/README.md)
-- [Next.js Example](../../../packages/webhook-utils/examples/nextjs-app-router.ts)
-- [Testing Examples](../../../packages/webhook-utils/examples/testing.ts)
+| Event | Description |
+|-------|-------------|
+| `membership.created` | A new membership was created |
+| `membership.updated` | A membership was updated |
+| `pass.created` | A pass was created |
+| `pass.updated` | A pass was updated |
+| `guild.updated` | Guild settings were updated |
+| `verification.completed` | A verification was completed |
 
-### Common Webhook Events
+### Response Codes
 
-| Event Type | Description | Data |
-|------------|-------------|------|
-| `member.joined` | A new member joined a guild | `{ memberId, guildId, userId, joinedAt }` |
-| `member.left` | A member left a guild | `{ memberId, guildId, userId, leftAt }` |
-| `pass.activated` | A guild pass was activated | `{ passId, guildId, userId, activatedAt, expiresAt }` |
-| `pass.expired` | A guild pass expired | `{ passId, guildId, userId, expiredAt }` |
-| `guild.updated` | Guild settings were updated | `{ guildId, changes, updatedAt }` |
+| Status | Meaning |
+|--------|---------|
+| 200 | Processed (`status: "success"`) or intentionally skipped (`status: "ignored"`) |
+| 401 | Missing or invalid signature |
+| 413 | Payload too large |
+| 422 | Invalid payload structure |
+| 429 | Rate limited (too many failed attempts from source) |
+| 500 | Internal error |
 
-### Error Codes
+---
 
-| Status | Meaning | Description |
-|--------|---------|-------------|
-| 200 | Success | Webhook processed successfully |
-| 401 | Unauthorized | Invalid or missing signature |
-| 500 | Internal Error | Server error processing webhook |
+## Additional Resources
 
-### Monitoring
-
-Consider adding monitoring for:
-- Failed signature verifications (potential security issues)
-- Webhook processing latency
-- Event type distribution
-- Timestamp age (detect clock skew issues)
-
-Example logging:
-
-```typescript
-console.log('Webhook metrics:', {
-  type: event.type,
-  verified: result.valid,
-  age: Date.now() / 1000 - result.timestamp!,
-  processingTime: Date.now() - startTime,
-});
-```
+- [Webhook Utils Package](../../../packages/webhook-utils/README.md)
+- [Root README](../../README.md)
