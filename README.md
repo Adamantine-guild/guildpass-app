@@ -105,6 +105,13 @@ pnpm start
 
 ---
 
+## Build Caching
+- Incremental builds are enabled by default
+- First build is slower; subsequent builds reuse cached data
+- Clean builds: `pnpm build:clean`
+
+---
+
 ## Type Checking & Linting
 
 - Type check all packages and apps: `pnpm typecheck`
