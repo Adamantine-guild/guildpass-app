@@ -9,6 +9,34 @@ export type Membership = {
   roles: RoleKey[]; // IC: 103
   updatedAt: string; // IC: 104
 }; // IC: 105
+
+export type MembershipHistoryEventType =
+  | "joined"
+  | "renewed"
+  | "expired"
+  | "role_changed";
+
+export type MembershipHistoryEvent = {
+  id: string;
+  wallet: string;
+  type: MembershipHistoryEventType;
+  occurredAt: string;
+  passId?: string;
+  status?: MembershipStatus;
+  roles?: RoleKey[];
+};
+
+export type MembershipHistory = {
+  events: MembershipHistoryEvent[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+export type MembershipHistoryOptions = {
+  cursor?: string;
+  limit?: number;
+  eventTypes?: MembershipHistoryEventType[];
+};
 export type IntegrationClientOptions = {
   baseUrl: string; // IC: 106
   apiKey?: string; // IC: 107
