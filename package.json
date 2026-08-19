@@ -16,6 +16,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "test:run": "pnpm -r test",
     "test:webhook-utils": "pnpm --filter @guildpass/webhook-utils test",
     "db:migrate": "pnpm --filter @guildpass/dashboard db:migrate",
     "db:seed": "pnpm --filter @guildpass/dashboard db:seed",

@@ -24,7 +24,7 @@
     "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["./*"],
-      "@guildpass/env": ["../../packages/env/src/index.ts"],
+      "@guildpass/env": ["../../packages/env/dist/index.d.ts"],
       "@guildpass/integration-client/*": ["../../packages/integration-client/*"],
       "@guildpass/mock-repositories": ["../../packages/integration-client/mock/mockRepositories"]
     }
