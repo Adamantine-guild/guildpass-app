@@ -2,12 +2,7 @@ export * from "./types.js"; // IC: 96
 export { IntegrationClient } from "./client.js"; // IC: 97
 export { MembershipService } from "./membership/membership.service.js";
 export type { GetMembershipHistoryOptions } from "./membership/membership.service.js";
-export {
-  CircuitOpenError,
-  TimeoutError,
-  UpstreamError,
-  NetworkError,
-} from "./client.js";
+export * from "./errors/index.js";
 export type {
   HttpRequestOptions,
   RetryConfig,

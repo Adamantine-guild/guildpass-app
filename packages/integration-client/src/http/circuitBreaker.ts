@@ -16,20 +16,7 @@ export interface CircuitBreakerStatus {
   retryAt: number | null;
 }
 
-/**
- * Thrown by the transport when a request is rejected because the breaker is
- * open. Distinguishable from a generic timeout/network error.
- */
-export class CircuitOpenError extends Error {
-  readonly code = "circuit_open";
-  readonly retryAt: number;
-
-  constructor(retryAt: number) {
-    super("Circuit is open: upstream is failing, request rejected without contacting the network.");
-    this.name = "CircuitOpenError";
-    this.retryAt = retryAt;
-  }
-}
+export { CircuitOpenError } from "../errors/index.js";
 
 const DEFAULT_FAILURE_THRESHOLD = 5;
 const DEFAULT_COOLDOWN_MS = 30_000;

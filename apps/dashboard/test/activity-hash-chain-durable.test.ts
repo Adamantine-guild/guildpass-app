@@ -70,7 +70,7 @@ if (!connectionString) {
       const repository = new DurableActivityRepository(connectionString);
       const storage = new DurableActivityStorage({ ttlSeconds: 3600 });
 
-      await repository.append("1", {
+      await repository.append("guild-1", {
         type: "member.joined",
         source: "dashboard",
         severity: "info",
@@ -86,7 +86,7 @@ if (!connectionString) {
         ),
         "recorded",
       );
-      await repository.append("1", {
+      await repository.append("guild-1", {
         type: "pass.created",
         source: "dashboard",
         severity: "info",

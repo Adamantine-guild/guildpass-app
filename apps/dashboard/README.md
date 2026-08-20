@@ -15,6 +15,20 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## Setup & Build Process
+
+### Path Aliases
+To share code across the monorepo, the dashboard uses TypeScript path aliases. In `tsconfig.json`, the `@guildpass/*` alias is mapped to `../../packages/*`. This allows importing from monorepo packages (e.g. `@guildpass/env`, `@guildpass/metrics`) without relative paths.
+
+### Build Order
+Next.js requires workspace packages to be available during its build. 
+1. Upstream packages (like `@guildpass/env`) build their outputs to `dist/` first.
+2. The Next.js dashboard uses `transpilePackages` in `next.config.mjs` to include the workspace packages in the build pipeline.
+3. The dashboard is built to `.next/`.
+
+### Required Environment
+If you are using `DASHBOARD_STORAGE_MODE=durable`, you must provide a valid `DATABASE_URL` during build and runtime. For local development, copy the `.env.example` to `.env.local`.
+
 ---
 
 ## Available Routes

@@ -24,8 +24,7 @@
     "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["./*"],
-      "@guildpass/integration-client/*": ["../../packages/integration-client/*"],
-      "@guildpass/mock-repositories": ["../../packages/integration-client/mock/mockRepositories"]
+      "@guildpass/*": ["../../packages/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

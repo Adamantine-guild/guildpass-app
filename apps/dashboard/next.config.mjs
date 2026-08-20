@@ -5,6 +5,7 @@ const nextConfig = {
     "@guildpass/env",
     "@guildpass/integration-client",
     "@guildpass/webhook-utils",
+    "@guildpass/metrics",
   ],
 
   // ── Production optimisations ──────────────────────────────────────
