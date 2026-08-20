@@ -10,6 +10,8 @@ export type {
 } from "./http/http.types.js";
 export * from "./contracts/contract.types.js";
 export { ContractClient } from "./contracts/contractClient.js";
+export * from "./contracts/contractHelpers.js";
+export { sdkConfig, defaultRetryConfig } from "./config/sdkConfig.js";
 export {
   upcastActivityEvent,
   upcastActivityEvents,

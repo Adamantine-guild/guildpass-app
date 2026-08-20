@@ -1,5 +1,7 @@
 import { HttpClient } from "../http/httpClient.js";
 import type { ContractCallOptions, JsonRpcRequest, JsonRpcResponse } from "./contract.types.js";
+import { withRetry } from "./contractHelpers.js";
+import { sdkConfig } from "../config/sdkConfig.js";
 
 /**
  * Thin JSON-RPC client for on-chain reads, used through
@@ -42,26 +44,28 @@ export class ContractClient {
       id: Date.now(),
     };
 
-    const res = await this.httpClient.request(this.rpcUrl, {
-      ...options,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-      body: JSON.stringify(body),
-    });
+    return withRetry(async () => {
+      const res = await this.httpClient.request(this.rpcUrl, {
+        ...options,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+        body: JSON.stringify(body),
+      });
 
-    if (!res.ok) {
-        throw new Error(`RPC_HTTP_ERROR:${res.status}`);
-    }
+      if (!res.ok) {
+          throw new Error(`RPC_HTTP_ERROR:${res.status}`);
+      }
 
-    const data: JsonRpcResponse<T> = await res.json();
+      const data: JsonRpcResponse<T> = await res.json();
 
-    if (data.error) {
-      throw new Error(`RPC_ERROR:${data.error.code} ${data.error.message}`);
-    }
+      if (data.error) {
+        throw new Error(`RPC_ERROR:${data.error.code} ${data.error.message}`);
+      }
 
-    return data.result as T;
+      return data.result as T;
+    }, sdkConfig.rpcRetry);
   }
 }
