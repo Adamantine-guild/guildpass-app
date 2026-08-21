@@ -9,6 +9,7 @@
     "packages/*"
   ],
   "scripts": {
+    "validate:workspace": "node scripts/validate-workspace.js",
     "dev": "pnpm --filter @guildpass/dashboard dev",
     "build": "tsc -b",
     "build:clean": "rm -rf dist .tsbuildinfo && tsc -b",

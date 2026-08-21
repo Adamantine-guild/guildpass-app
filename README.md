@@ -79,6 +79,8 @@ WEBHOOK_SECRET=your_secret_here
 
 ## Development
 
+For a comprehensive guide on the workspace structure, build order, and monorepo commands, please read [MONOREPO.md](./MONOREPO.md).
+
 Run the local development server:
 
 ```bash
