@@ -4,18 +4,16 @@
   "private": true,
   "type": "module",
   "description": "Shared environment validation schemas for GuildPass apps",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": "./dist/index.js"
     },
     "./cli": {
       "types": "./dist/cli/index.d.ts",
-      "import": "./dist/cli/index.js",
-      "require": "./dist/cli/index.cjs"
+      "import": "./dist/cli/index.js"
     }
   },
   "bin": {
