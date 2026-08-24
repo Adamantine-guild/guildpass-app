@@ -20,7 +20,7 @@ import {
   discordBotEnvSchema,
   validateEnv,
   EnvValidationError,
-} from "../index.js";
+} from "../index.ts";
 
 type AppName = "dashboard" | "access-api" | "discord-bot";
 

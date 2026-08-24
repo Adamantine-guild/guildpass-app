@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { dashboardEnvSchema } from "../src/schemas/dashboard.js";
-import { EnvValidationError, validateEnv } from "../src/validate.js";
+import { dashboardEnvSchema } from "../src/schemas/dashboard.ts";
+import { EnvValidationError, validateEnv } from "../src/validate.ts";
 
 test("applies development defaults when nothing is set", () => {
   const env = validateEnv(dashboardEnvSchema, {});
