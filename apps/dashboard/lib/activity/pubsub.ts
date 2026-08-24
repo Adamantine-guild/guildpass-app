@@ -42,7 +42,7 @@ import type { ActivityEvent } from "./types";
 import { getPool } from "../db";
 import { getStorageMode, getStorageConfig } from "../env";
 
-import { PoolClient } from "pg";
+import type { PoolClient } from "pg";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type ActivitySubscriber = (event: ActivityEvent) => void;

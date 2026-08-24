@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiValidationError, handleApiError } from "@/lib/api-helpers";
 import { requireSessionAndPermission } from "@/lib/auth/require-permission";
 import { getSettingsRepository } from "@/lib/repositories/factory";

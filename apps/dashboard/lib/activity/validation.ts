@@ -43,13 +43,6 @@ export const DataSchemas = {
   }),
 } as const;
 
-function mapIssueToField(issue: z.ZodIssue, prefix = ""): { field: string; message: string } {
-  const path = [...prefix.split(".").filter(Boolean), ...issue.path].join(".");
-  return {
-    field: path || "body",
-    message: issue.message,
-  };
-}
 
 export function validateWebhookPayload(rawBody: string): ValidationResult {
   let parsed: unknown;

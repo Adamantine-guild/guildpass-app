@@ -18,7 +18,7 @@
  *  - All coordination is database-backed — no external service required.
  */
 
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 // ─── Configuration ───────────────────────────────────────────────────────────
@@ -346,28 +346,27 @@ export class LeaderElectionService {
 
   private startRenewLoop(): void {
     this.clearTimers();
-    this.renewTimer = setInterval(async () => {
-      try {
-        await this.renewLease();
-      } catch (err) {
+    this.renewTimer = setInterval(() => {
+      void this.renewLease().catch((err) => {
         console.error("[LeaderElection] Lease renewal error:", err);
-      }
+      });
     }, this.renewIntervalMs);
   }
 
   private startPollLoop(): void {
     this.clearTimers();
-    this.pollTimer = setInterval(async () => {
-      try {
-        const became = await this.tryBecomeLeader();
-        if (became) {
-          // Switch from polling to renewing
-          this.clearTimers();
-          this.startRenewLoop();
-        }
-      } catch (err) {
-        console.error("[LeaderElection] Poll error:", err);
-      }
+    this.pollTimer = setInterval(() => {
+      void this.tryBecomeLeader()
+        .then((became) => {
+          if (became) {
+            // Switch from polling to renewing
+            this.clearTimers();
+            this.startRenewLoop();
+          }
+        })
+        .catch((err) => {
+          console.error("[LeaderElection] Poll error:", err);
+        });
     }, this.standbyPollIntervalMs);
   }
 

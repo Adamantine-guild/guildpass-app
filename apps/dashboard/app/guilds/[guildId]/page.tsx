@@ -66,7 +66,7 @@ export default function GuildOverviewPage() {
       }
     }
 
-    if (activeId) load();
+    if (activeId) void load();
     return () => {
       mounted = false;
     };

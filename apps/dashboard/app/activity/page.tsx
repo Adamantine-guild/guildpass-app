@@ -6,7 +6,6 @@ import WalletAddressText from "@/components/WalletAddressText";
 import { getActivityRefreshConfig } from "@/lib/env";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { useActivityFeed } from "@/lib/hooks/useActivityFeed";
-import { convertToCsv, downloadCsv, } from "@/lib/csv-export";
 import {
   type ActivityEventEntity,
   type ActivityEventSeverity,
@@ -221,51 +220,6 @@ function ActivityPageContent() {
     guildId,
   });
 
-  const handleExportCsv = () => {
-  const exportData = events.map((activity) => ({
-    type: activity.type,
-    description: activity.description,
-    timestamp: new Date(activity.timestamp).toISOString(),
-    actor:
-      activity.actor.name ||
-      activity.actor.wallet ||
-      "System",
-    entity: activity.entity
-      ? `${activity.entity.type}: ${
-          activity.entity.name || activity.entity.id
-        }`
-      : "",
-    source: activity.source,
-    severity: activity.severity,
-  }));
-
-  const columns: {
-  key:
-    | "type"
-    | "description"
-    | "timestamp"
-    | "actor"
-    | "entity"
-    | "source"
-    | "severity";
-  label: string;
-}[] = [
-  { key: "type", label: "Type" },
-  { key: "description", label: "Description" },
-  { key: "timestamp", label: "Timestamp" },
-  { key: "actor", label: "Actor" },
-  { key: "entity", label: "Entity" },
-  { key: "source", label: "Source" },
-  { key: "severity", label: "Severity" },
-];
-
-  const csv = convertToCsv(exportData, columns);
-
-  const date = new Date().toISOString().split("T")[0];
-
-  downloadCsv(csv, `activity-log-${date}.csv`);
-};
-
   const hasActiveFilters = Boolean(type || source || severity || entityType || actor.trim() || from || sort !== "newest" || limit !== 10);
 
   const clearFilters = () => {
@@ -294,7 +248,7 @@ function ActivityPageContent() {
         </div>
         <button
           type="button"
-          onClick={refresh}
+          onClick={() => void refresh()}
           disabled={refreshing}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           title="Fetch the latest activity events"
@@ -512,7 +466,7 @@ function ActivityPageContent() {
               <div className="border-t border-slate-100 px-6 py-4 text-center">
                 <button
                   type="button"
-                  onClick={loadMore}
+                  onClick={() => void loadMore()}
                   disabled={loadingMore}
                   className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >

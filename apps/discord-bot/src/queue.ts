@@ -162,7 +162,7 @@ export class RoleReconciliationQueue {
       });
 
       // Fire-and-forget the task; processNext will be called again on completion.
-      this.executeWithRetries(entry).finally(() => {
+      void this.executeWithRetries(entry).finally(() => {
         // noop — cleanup is inside executeWithRetries
       });
     }

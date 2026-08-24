@@ -50,7 +50,7 @@ export default function ReconcilePanel() {
         <div className="flex items-center gap-3 mb-4">
           <button
             type="button"
-            onClick={() => run("dry-run")}
+            onClick={() => void run("dry-run")}
             disabled={running}
             className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
@@ -58,7 +58,7 @@ export default function ReconcilePanel() {
           </button>
           <button
             type="button"
-            onClick={() => run("apply")}
+            onClick={() => void run("apply")}
             disabled={running}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
           >

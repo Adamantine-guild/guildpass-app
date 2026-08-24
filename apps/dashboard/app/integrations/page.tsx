@@ -3,8 +3,8 @@ import IntegrationsListState, {
   type IntegrationsListStatus,
 } from "@/components/IntegrationsListState";
 import { getServerComponentSession } from "@/lib/auth/server-session";
-import { getIntegrationsList, IntegrationStatus } from "@/lib/integrations";
-import type { IntegrationDetails } from "@/lib/integrations";
+import { getIntegrationsList } from "@/lib/integrations";
+import type { IntegrationDetails, IntegrationStatus } from "@/lib/integrations";
 import AccessDenied from "@/components/AccessDenied";
 import ReconcilePanel from "@/components/ReconcilePanel";
 import { hasRole } from "@/lib/permissions";

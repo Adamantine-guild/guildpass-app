@@ -1,6 +1,3 @@
-import { GuildPassError } from "../errors/GuildPassError.js";
-import { ErrorCodes } from "../errors/errorCodes.js";
-
 export type CircuitState = "closed" | "open" | "half-open";
 
 export interface CircuitBreakerConfig {

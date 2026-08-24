@@ -27,12 +27,6 @@ function delayedTask<T>(ms: number, value: T): () => Promise<T> {
   return () => new Promise((r) => setTimeout(() => r(value), ms));
 }
 
-/** Create a task that rejects after `ms`. */
-function failingTask(ms: number, error: unknown): () => Promise<never> {
-  return () =>
-    new Promise((_, reject) => setTimeout(() => reject(error), ms));
-}
-
 /** Collect all metrics events into an array. */
 function collectMetrics(): { events: QueueMetrics[]; handler: MetricsHandler } {
   const events: QueueMetrics[] = [];

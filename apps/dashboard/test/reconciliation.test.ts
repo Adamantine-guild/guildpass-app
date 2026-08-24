@@ -15,12 +15,10 @@
 import { describe, test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { reconcileGuildCounts } from "../lib/reconciliation/index";
-import type { ReconcileOptions, ReconciliationReport } from "../lib/reconciliation/types";
+import type { ReconcileOptions } from "../lib/reconciliation/types";
 import {
   clearRepositories,
   getGuildRepository,
-  getMemberRepository,
-  getPassRepository,
   getActivityRepository,
 } from "../lib/repositories/factory";
 import type { Guild } from "../lib/mock-data";

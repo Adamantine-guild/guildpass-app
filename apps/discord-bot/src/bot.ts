@@ -1,5 +1,5 @@
-import { Client, GatewayIntentBits, Events } from "discord.js";
-import { config, validateConfig } from "./config.js";
+import { Client, GatewayIntentBits, Events, type Interaction } from "discord.js";
+import { config } from "./config.js";
 import { RoleReconciliationQueue } from "./queue.js";
 import { reconcileMemberRoles, resolveDesiredRoles, type RoleMap } from "./roles.js";
 import { handleGuildStats } from "./commands/guild-stats.js";
@@ -128,7 +128,7 @@ export function createClient(options: BotOptions = {}): Client {
 
   // ── Slash-command handling ────────────────────────────────────────────
 
-  client.on(Events.InteractionCreate, async (interaction) => {
+  const handleInteraction = async (interaction: Interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
     switch (interaction.commandName) {
@@ -283,6 +283,10 @@ export function createClient(options: BotOptions = {}): Client {
         // Unknown command — silently ignore.
         return;
     }
+  };
+
+  client.on(Events.InteractionCreate, (interaction) => {
+    void handleInteraction(interaction);
   });
 
   // ── Error resilience ──────────────────────────────────────────────────

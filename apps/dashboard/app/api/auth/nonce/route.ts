@@ -9,7 +9,7 @@
  * Response: { ok: true, data: { nonce: string, expiresIn: number } }
  *   expiresIn is the nonce lifetime in seconds.
  */
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiResponse } from "@/lib/api-helpers";
 import { getNonceStore, NONCE_TTL_MS } from "@/lib/auth/nonce-store";
 

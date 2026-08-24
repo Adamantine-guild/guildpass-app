@@ -15,6 +15,7 @@
     "start": "pnpm --filter @guildpass/dashboard start",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
+    "lint:fix": "eslint . --fix",
     "test": "pnpm -r test",
     "test:run": "pnpm -r test",
     "test:webhook-utils": "pnpm --filter @guildpass/webhook-utils test",

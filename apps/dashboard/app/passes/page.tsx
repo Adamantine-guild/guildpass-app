@@ -138,7 +138,7 @@ export default function PassesPage() {
       }
     }
 
-    load();
+    void load();
     return () => {
       mounted = false;
     };
@@ -203,13 +203,46 @@ export default function PassesPage() {
   };
 
   const handleDeactivate = (id: string) => {
-    updateMutation.mutate({ id, data: { status: "inactive" } });
+    // Errors are surfaced via onError (alert); avoid unhandled rejection
+    updateMutation.mutate({ id, data: { status: "inactive" } }).catch(() => {});
   };
 
   const handleEdit = (id: string) => {
     const name = prompt("Enter new name:");
     if (name?.trim()) {
-      updateMutation.mutate({ id, data: { name: name.trim() } });
+      // Errors are surfaced via onError (alert); avoid unhandled rejection
+      updateMutation.mutate({ id, data: { name: name.trim() } }).catch(() => {});
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) return alert("Pass name is required.");
+    if (!form.description.trim()) return alert("Description is required.");
+
+    try {
+      setCreateLoading(true);
+      const res = await guildFetch("/api/passes", guildId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          description: form.description.trim(),
+          price: form.price ? Number(form.price) : undefined,
+          maxSupply: form.maxSupply ? Number(form.maxSupply) : null,
+          status: "draft",
+          currentSupply: 0,
+        }),
+      });
+      const newPass = await readApiResult<MockPass>(res);
+      setPasses((prev) => [newPass, ...prev].slice(0, pagination.limit));
+      setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+      invalidateAfterMutation("pass", guildId);
+      setIsCreateOpen(false);
+      setForm({ name: "", description: "", price: "", maxSupply: "" });
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : "Failed to create pass.");
+    } finally {
+      setCreateLoading(false);
     }
   };
 
@@ -286,36 +319,7 @@ export default function PassesPage() {
               <button
                 disabled={createLoading}
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                onClick={async () => {
-                  if (!form.name.trim()) return alert("Pass name is required.");
-                  if (!form.description.trim()) return alert("Description is required.");
-
-                  try {
-                    setCreateLoading(true);
-                    const res = await guildFetch("/api/passes", guildId, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        name: form.name.trim(),
-                        description: form.description.trim(),
-                        price: form.price ? Number(form.price) : undefined,
-                        maxSupply: form.maxSupply ? Number(form.maxSupply) : null,
-                        status: "draft",
-                        currentSupply: 0,
-                      }),
-                    });
-                    const newPass = await readApiResult<MockPass>(res);
-                    setPasses((prev) => [newPass, ...prev].slice(0, pagination.limit));
-                    setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
-                    invalidateAfterMutation("pass", guildId);
-                    setIsCreateOpen(false);
-                    setForm({ name: "", description: "", price: "", maxSupply: "" });
-                  } catch (error: unknown) {
-                    alert(error instanceof Error ? error.message : "Failed to create pass.");
-                  } finally {
-                    setCreateLoading(false);
-                  }
-                }}
+                onClick={() => void handleCreate()}
               >
                 {createLoading ? "Creating..." : "Create"}
               </button>

@@ -1,4 +1,4 @@
-import { HttpClient } from "../http/httpClient.js";
+import type { HttpClient } from "../http/httpClient.js";
 import type { ContractCallOptions, JsonRpcRequest, JsonRpcResponse } from "./contract.types.js";
 import { withRetry } from "./contractHelpers.js";
 import { sdkConfig } from "../config/sdkConfig.js";

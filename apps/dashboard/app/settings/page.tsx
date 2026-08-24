@@ -98,7 +98,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <form onSubmit={handleSave}>
+      <form onSubmit={(event) => void handleSave(event)}>
         {/* General Settings and Profile */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* General Settings */}

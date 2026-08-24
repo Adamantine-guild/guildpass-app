@@ -38,7 +38,7 @@ export default function WalletAddressText({
       <span title={address} aria-label={`Wallet address: ${address}`}>{truncated}</span>
       <button
         type="button"
-        onClick={handleCopy}
+        onClick={() => void handleCopy()}
         aria-label="Copy wallet address"
         className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
       >

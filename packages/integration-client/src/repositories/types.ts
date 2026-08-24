@@ -1,5 +1,7 @@
 // packages/integration-client/src/repositories/types.ts
 
+import type { Activity, Guild, Member, Pass } from "../types.js";
+
 /**
  * Generic pagination result.
  */
@@ -15,24 +17,24 @@ export interface Paginated<T> {
 // Base repository signatures for each entity.
 export interface PassRepository {
   /** List passes – pagination can be added later */
-  list(): Promise<Paginated<import('../types.js').Pass>>;
+  list(): Promise<Paginated<Pass>>;
   /** Get a single pass by id */
-  get(id: string): Promise<import('../types.js').Pass | undefined>;
+  get(id: string): Promise<Pass | undefined>;
 }
 
 export interface GuildRepository {
-  list(): Promise<Paginated<import('../types.js').Guild>>;
-  get(id: string): Promise<import('../types.js').Guild | undefined>;
+  list(): Promise<Paginated<Guild>>;
+  get(id: string): Promise<Guild | undefined>;
 }
 
 export interface MemberRepository {
-  list(): Promise<Paginated<import('../types.js').Member>>;
-  get(id: string): Promise<import('../types.js').Member | undefined>;
+  list(): Promise<Paginated<Member>>;
+  get(id: string): Promise<Member | undefined>;
 }
 
 export interface ActivityRepository {
   /** Return activity events – same shape as current mock fetchActivity */
-  list(): Promise<import('../types.js').Activity[]>;
+  list(): Promise<Paginated<Activity>>;
   /** Generate a mock activity for testing */
-  generateMock(): Promise<import('../types.js').Activity>;
+  generateMock(): Promise<Activity>;
 }

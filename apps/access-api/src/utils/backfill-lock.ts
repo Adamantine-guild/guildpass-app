@@ -15,7 +15,7 @@
  *    a stale lock was erroneously held (e.g. after a crash).
  */
 
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 /** How long (ms) before a lock heartbeat is considered stale. */
 const LOCK_TTL_MS = 60_000; // 1 minute
@@ -171,7 +171,7 @@ export class BackfillLock {
   /** Returns all currently-held (possibly stale) locks. */
   async listLocks(): Promise<LockInfo[]> {
     const rows = await this.prisma.backfillLock.findMany();
-    return rows.map((r: { holder: string; acquiredAt: Date; liveHead: Date | null }) => ({
+    return rows.map((r: { holder: string; acquiredAt: Date; liveHead: bigint | null }) => ({
       holder: r.holder as LockHolder,
       acquiredAt: r.acquiredAt,
       liveHead: r.liveHead ?? undefined,

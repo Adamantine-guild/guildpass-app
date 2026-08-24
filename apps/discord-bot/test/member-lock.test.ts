@@ -351,7 +351,7 @@ describe("MemberReconciliationLock", () => {
 
     it("never interleaves read-modify-write cycles for the same member", async () => {
       const operationLog: { phase: string; time: number }[] = [];
-      let currentRoles = new Set<string>();
+      const currentRoles = new Set<string>();
 
       const state: MockRoleState = {
         currentRoles: currentRoles,

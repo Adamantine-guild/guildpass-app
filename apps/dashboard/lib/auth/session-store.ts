@@ -278,7 +278,7 @@ export function createSessionStore(): SessionStore {
       const refreshTokenHash = await hashToken(refreshToken);
 
       // Get or initialize the user's generation counter.
-      let generation = store.generations.get(userId) ?? 0;
+      const generation = store.generations.get(userId) ?? 0;
 
       const record: SessionRecord = {
         sessionId,

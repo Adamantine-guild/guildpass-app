@@ -110,4 +110,5 @@ function mapLegacyActivityType(type: string): ActivityEvent["type"] {
   return map[type] ?? (type as ActivityEvent["type"]);
 }
 
-main();
+// main() handles its own errors (exit codes) — no await needed at top level
+void main();

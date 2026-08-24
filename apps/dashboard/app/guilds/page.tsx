@@ -65,7 +65,7 @@ export default function GuildsPage() {
         setListState("error");
       }
     }
-    load();
+    void load();
     return () => {
       mounted = false;
     };
@@ -141,13 +141,15 @@ export default function GuildsPage() {
   const handleRename = (id: string, currentName: string) => {
     const name = prompt("Enter new name:", currentName);
     if (name && name !== currentName) {
-      updateMutation.mutate({ id, data: { name } });
+      // Errors are surfaced via onError (alert); avoid unhandled rejection
+      updateMutation.mutate({ id, data: { name } }).catch(() => {});
     }
   };
 
   const handleDelete = (id: string) => {
     if (confirm("Are you sure you want to delete this guild?")) {
-      deleteMutation.mutate(id);
+      // Errors are surfaced via onError (alert); avoid unhandled rejection
+      deleteMutation.mutate(id).catch(() => {});
     }
   };
 

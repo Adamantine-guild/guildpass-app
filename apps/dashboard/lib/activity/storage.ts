@@ -8,8 +8,9 @@ import {
 
 import { query } from "../db";
 import { type Activity, mockActivity } from "../mock-data";
-import { ActivityQuery, ActivityQueryResult, filterActivityEvents } from "./query";
-import { ActivityEvent } from "./types";
+import type { ActivityQuery, ActivityQueryResult } from "./query";
+import { filterActivityEvents } from "./query";
+import type { ActivityEvent } from "./types";
 import { recordDurableActivityEvent } from "./hash-chain";
 import {
   DurableIdempotencyStore,
@@ -100,7 +101,7 @@ export class InMemoryActivityStorage implements IActivityStorage {
 
     mockActivity.forEach((activity) => {
       this.events.unshift(convertMockActivityToEvent(activity));
-      this.idempotencyStore.markSeen(activity.id);
+      void this.idempotencyStore.markSeen(activity.id);
     });
   }
 
@@ -150,7 +151,7 @@ export class InMemoryActivityStorage implements IActivityStorage {
     this.events = [];
     mockActivity.forEach((activity) => {
       this.events.unshift(convertMockActivityToEvent(activity));
-      this.idempotencyStore.markSeen(activity.id);
+      void this.idempotencyStore.markSeen(activity.id);
     });
   }
 }

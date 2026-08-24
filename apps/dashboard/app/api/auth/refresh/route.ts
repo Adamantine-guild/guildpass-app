@@ -16,7 +16,7 @@
  *   { accessToken: string, refreshToken: string, expiresIn: number }
  */
 
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiError, apiResponse, apiValidationError } from "@/lib/api-helpers";
 import { getSessionStore } from "@/lib/auth/server-session";
 import { ACCESS_TOKEN_TTL, refreshSessionWithMetadata } from "@/lib/auth/session-store";
@@ -47,7 +47,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   let currentRole: Role = "readonly";
 
   if (accessToken) {
-    const sessionStore = getSessionStore();
     // Allow expired tokens for metadata extraction only.
     try {
       // Decode without expiry check by looking at the raw payload.

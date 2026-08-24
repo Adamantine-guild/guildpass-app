@@ -134,4 +134,5 @@ async function main() {
   }
 }
 
-main();
+// main() handles its own errors (exit codes) — no await needed at top level
+void main();

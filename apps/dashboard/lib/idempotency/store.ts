@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rm, unlink } from "node:fs/promises";
+import { mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { query } from "../db";

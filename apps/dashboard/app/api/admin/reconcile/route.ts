@@ -18,7 +18,7 @@
  *   Caller lacks guilds:write permission.
  */
 
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiError, apiResponse, apiValidationError, handleApiError } from "@/lib/api-helpers";
 import { requireDashboardSession, UnauthorizedError } from "@/lib/auth/server-session";
 import { assertPermission, PermissionDeniedError } from "@/lib/permissions";

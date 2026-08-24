@@ -1,5 +1,4 @@
 import test, { after, beforeEach } from "node:test";
-import assert from "node:assert/strict";
 import { query } from "../../lib/db";
 import { mockGuilds, mockPasses, mockMembers } from "../../lib/mock-data";
 import {

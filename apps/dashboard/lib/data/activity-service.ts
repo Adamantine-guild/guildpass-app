@@ -1,5 +1,8 @@
-import { ActivityEvent, CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION } from "@guildpass/integration-client";
-import { ActivityQuery, ActivityQueryResult } from "../activity/query";
+import {
+  CURRENT_ACTIVITY_EVENT_SCHEMA_VERSION,
+  type ActivityEvent,
+} from "@guildpass/integration-client";
+import type { ActivityQuery, ActivityQueryResult } from "../activity/query";
 import { activityStorage } from "../activity/storage";
 
 export interface ActivityStats {

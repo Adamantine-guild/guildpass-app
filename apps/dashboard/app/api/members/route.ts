@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import {
 apiError,
 apiResponse,
@@ -8,9 +8,6 @@ handleApiError,
 } from "@/lib/api-helpers";
 import { NotFoundError } from "@/lib/api-errors";
 import { mockMembers, type Member } from "@/lib/mock-data";
-import { MOCK_API_SESSION } from "@/lib/auth/session";
-import { assertPermission, PermissionDeniedError } from "@/lib/permissions";
-import { assertCsrfToken, CsrfError } from "@/lib/auth/csrf";
 import { getActiveGuildId } from "@/lib/guild-context";
 import { requireSessionAndPermission } from "@/lib/auth/require-permission";
 import { IntegrationClient } from "@guildpass/integration-client";

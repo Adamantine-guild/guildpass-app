@@ -13,24 +13,19 @@
  *  - Server-session integration (live mode token extraction)
  */
 
-import { describe, test, beforeEach, afterEach } from "node:test";
+import { describe, test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   createSessionStore,
   clearSessionStore,
   ACCESS_TOKEN_TTL,
-  REFRESH_TOKEN_TTL,
   type SessionStore,
   type TokenPair,
 } from "../lib/auth/session-store.ts";
 import { ROLE_PERMISSIONS } from "../lib/auth/session.ts";
-import type { Role, Session } from "../lib/auth/session.ts";
+import type { Role } from "../lib/auth/session.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Sign in a test user and return the token pair.
@@ -217,7 +212,7 @@ describe("SessionStore — explicit revocation", () => {
   });
 
   test("revokeSession marks the session as revoked", async () => {
-    const tokens = await signIn(store);
+    await signIn(store);
     const sessions = await store.getUserSessions("test-user-001");
     await store.revokeSession(sessions[0].sessionId);
 
@@ -226,7 +221,7 @@ describe("SessionStore — explicit revocation", () => {
   });
 
   test("revoking one session does not affect other sessions of the same user", async () => {
-    const t1 = await signIn(store);
+    await signIn(store);
     // Create a second session for the same user
     const t2 = await store.createSession({
       userId: "test-user-001",
@@ -456,13 +451,13 @@ describe("SessionStore — multiple sessions", () => {
   });
 
   test("a user can have multiple concurrent sessions", async () => {
-    const t1 = await signIn(store);
-    const t2 = await store.createSession({
+    await signIn(store);
+    await store.createSession({
       userId: "test-user-001",
       name: "Test User",
       role: "admin",
     });
-    const t3 = await store.createSession({
+    await store.createSession({
       userId: "test-user-001",
       name: "Test User",
       role: "admin",

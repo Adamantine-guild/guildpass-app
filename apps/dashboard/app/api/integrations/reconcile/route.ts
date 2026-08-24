@@ -21,7 +21,7 @@
  * Response (403): Caller lacks settings:write.
  */
 
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { IntegrationClient } from "@guildpass/integration-client";
 import { apiError, apiResponse, apiValidationError, handleApiError } from "@/lib/api-helpers";
 import { requireDashboardSession, UnauthorizedError } from "@/lib/auth/server-session";

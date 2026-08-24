@@ -31,7 +31,6 @@ import type {
   PassCreateData,
   PassListQuery,
   PassUpdateData,
-  ActivityEventInput,
 } from "../types";
 import type { Pass, Guild, Member } from "../../mock-data";
 import { DEFAULT_GUILD_ID } from "../../mock-data";
@@ -1407,7 +1406,6 @@ export class DurableSettingsRepository
           const encrypted = this.encryptSecret(webhookForwardingSecret);
           setClauses.push(`webhook_forwarding_secret = $${idx}`);
           setParams.push(encrypted);
-          idx++;
         } else {
           setClauses.push(`webhook_forwarding_secret = NULL`);
         }

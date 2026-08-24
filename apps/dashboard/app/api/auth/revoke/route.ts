@@ -13,7 +13,7 @@
  *           admin/owner can revoke any session).
  */
 
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiError, apiResponse, apiValidationError } from "@/lib/api-helpers";
 import { requireDashboardSession, UnauthorizedError, getSessionStore } from "@/lib/auth/server-session";
 import { assertPermission, PermissionDeniedError } from "@/lib/permissions";

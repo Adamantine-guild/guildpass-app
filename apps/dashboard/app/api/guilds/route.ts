@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import {
   apiUnsupported,
   apiValidationError,
@@ -137,27 +137,3 @@ export async function DELETE(request: Request): Promise<NextResponse> {
   });
 }
 
-function validateGuildCreate(body: any): ApiFieldError[] {
-  const errors: ApiFieldError[] = [];
-
-  if (typeof body?.name !== "string" || body.name.trim().length === 0) {
-    errors.push({ field: "name", message: "name is required" });
-  }
-
-  if (
-    typeof body?.description !== "string" ||
-    body.description.trim().length === 0
-  ) {
-    errors.push({ field: "description", message: "description is required" });
-  }
-
-  if (body?.memberCount !== undefined && !Number.isInteger(body.memberCount)) {
-    errors.push({ field: "memberCount", message: "memberCount must be an integer" });
-  }
-
-  if (body?.passCount !== undefined && !Number.isInteger(body.passCount)) {
-    errors.push({ field: "passCount", message: "passCount must be an integer" });
-  }
-
-  return errors;
-}

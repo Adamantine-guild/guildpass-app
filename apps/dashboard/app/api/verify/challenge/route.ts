@@ -9,7 +9,7 @@
  * Request body:  { discordUserId: string, wallet: string }
  * Response:      { nonce, message, expiresAt, expiresIn }
  */
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import {
   apiResponse,
   apiValidationError,

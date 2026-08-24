@@ -13,7 +13,7 @@
  *   { accessToken: string, refreshToken: string, expiresIn: number }
  */
 
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiError, apiResponse, apiValidationError } from "@/lib/api-helpers";
 import { getSessionStore } from "@/lib/auth/server-session";
 import { ACCESS_TOKEN_TTL } from "@/lib/auth/session-store";

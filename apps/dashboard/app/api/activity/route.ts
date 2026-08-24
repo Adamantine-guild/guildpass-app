@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { apiError, apiResponse, apiValidationError } from "@/lib/api-helpers";
 import { filterActivityEvents, parseActivityQuery } from "@/lib/activity/query";
 import { activityStorage } from "@/lib/activity/storage";

@@ -297,7 +297,7 @@ function MembersPageContent() {
       }
     }
 
-    load();
+    void load();
     return () => {
       mounted = false;
     };
@@ -380,13 +380,59 @@ function MembersPageContent() {
 
   const handleRemove = (id: string) => {
     if (confirm("Are you sure you want to remove this member?")) {
-      deleteMutation.mutate(id);
+      // Errors are surfaced via onError (alert); avoid unhandled rejection
+      deleteMutation.mutate(id).catch(() => {});
     }
   };
 
   const handleRolesChange = (id: string, roles: string[]) => {
     const member = members.find((m) => m.id === id);
-    updateMutation.mutate({ id, data: { roles, version: member?.version } });
+    // Errors are surfaced via onError (alert); avoid unhandled rejection
+    updateMutation.mutate({ id, data: { roles, version: member?.version } }).catch(() => {});
+  };
+
+  const handleInvite = async () => {
+    if (!form.name.trim()) return alert("Name is required");
+
+    const normalizedWallet = tryNormaliseAddress(form.wallet);
+    if (!normalizedWallet) {
+      setWalletError("Enter a valid Ethereum wallet address (0x followed by 40 hex characters).");
+      return;
+    }
+    setWalletError(null);
+
+    try {
+      setInviteLoading(true);
+      const res = await guildFetch("/api/members", guildId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: form.name.trim(), wallet: normalizedWallet }),
+      });
+      const newMember = await readApiResult<MockMember>(res);
+      const safeMember = {
+        ...newMember,
+        roles: newMember.roles ?? [],
+        status: newMember.status ?? "pending",
+      };
+      setMembers((prev) => [safeMember, ...prev].slice(0, pagination.limit));
+      setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+      invalidateAfterMutation("member", guildId);
+      setIsInviteOpen(false);
+      setForm({ name: "", wallet: "" });
+    } catch (error: unknown) {
+      const walletFieldError =
+        error instanceof ApiClientError
+          ? error.fields?.find((field) => field.field === "wallet")?.message
+          : undefined;
+
+      if (walletFieldError) {
+        setWalletError(walletFieldError);
+      } else {
+        alert(error instanceof Error ? error.message : "Failed to invite member.");
+      }
+    } finally {
+      setInviteLoading(false);
+    }
   };
 
   const handleExportCsv = () => {
@@ -595,49 +641,7 @@ function MembersPageContent() {
               <button
                 disabled={inviteLoading}
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                onClick={async () => {
-                  if (!form.name.trim()) return alert("Name is required");
-
-                  const normalizedWallet = tryNormaliseAddress(form.wallet);
-                  if (!normalizedWallet) {
-                    setWalletError("Enter a valid Ethereum wallet address (0x followed by 40 hex characters).");
-                    return;
-                  }
-                  setWalletError(null);
-
-                  try {
-                    setInviteLoading(true);
-                    const res = await guildFetch("/api/members", guildId, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: form.name.trim(), wallet: normalizedWallet }),
-                    });
-                    const newMember = await readApiResult<MockMember>(res);
-                    const safeMember = {
-                      ...newMember,
-                      roles: newMember.roles ?? [],
-                      status: newMember.status ?? "pending",
-                    };
-                    setMembers((prev) => [safeMember, ...prev].slice(0, pagination.limit));
-                    setPagination((prev) => ({ ...prev, total: prev.total + 1 }));
-                    invalidateAfterMutation("member", guildId);
-                    setIsInviteOpen(false);
-                    setForm({ name: "", wallet: "" });
-                  } catch (error: unknown) {
-                    const walletFieldError =
-                      error instanceof ApiClientError
-                        ? error.fields?.find((field) => field.field === "wallet")?.message
-                        : undefined;
-
-                    if (walletFieldError) {
-                      setWalletError(walletFieldError);
-                    } else {
-                      alert(error instanceof Error ? error.message : "Failed to invite member.");
-                    }
-                  } finally {
-                    setInviteLoading(false);
-                  }
-                }}
+                onClick={() => void handleInvite()}
               >
                 {inviteLoading ? "Inviting..." : "Invite"}
               </button>
