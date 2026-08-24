@@ -6,7 +6,12 @@
     "rootDir": "src",
     "declaration": true,
     "emitDeclarationOnly": false,
-    "sourceMap": true
+    "sourceMap": true,
+    // Source imports use TypeScript syntax (e.g. "./schemas/dashboard.ts")
+    // instead of hardcoded ".js" extensions, so resolution no longer depends
+    // on the emit format. tsc rewrites these to ".js" in the emitted output.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src"]
 }
