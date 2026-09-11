@@ -3,34 +3,25 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "GuildPass web application for managing communities, passes, members, and access.",
+  "description": "GuildPass web application for communities, memberships, passes and access management.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "node --import tsx --experimental-test-module-mocks --test test/**/*.test.ts",
-    "test:js": "node --test test/**/*.test.js"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=24"
   },
   "packageManager": "pnpm@11.16.0",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Adamantine-guild/guildpass-app.git"
-  },
-  "homepage": "https://github.com/Adamantine-guild/guildpass-app",
-  "bugs": {
-    "url": "https://github.com/Adamantine-guild/guildpass-app/issues"
-  },
-  "license": "MIT",
   "dependencies": {
     "next": "14.2.21",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "zod": "^4.5.4"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -41,8 +32,8 @@
     "eslint": "^10.5.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.22.4",
     "typescript": "^5.9.0",
-    "typescript-eslint": "^8.61.0"
+    "typescript-eslint": "^8.61.0",
+    "vitest": "^3.2.7"
   }
 }
