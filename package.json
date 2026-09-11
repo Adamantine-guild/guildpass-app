@@ -1,35 +1,22 @@
 {
   "name": "guildpass-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "GuildPass web app dashboard for managing passes, communities, and members",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "description": "GuildPass web application for managing communities, passes, members, and access.",
   "scripts": {
-    "dev": "pnpm --filter @guildpass/dashboard dev",
-    "build": "tsc -b",
-    "build:clean": "rm -rf dist .tsbuildinfo && tsc -b",
-    "start": "pnpm --filter @guildpass/dashboard start",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
-    "lint:fix": "eslint . --fix",
-    "test": "pnpm -r test",
-    "test:run": "pnpm -r test",
-    "test:webhook-utils": "pnpm --filter @guildpass/webhook-utils test",
-    "db:migrate": "pnpm --filter @guildpass/dashboard db:migrate",
-    "db:seed": "pnpm --filter @guildpass/dashboard db:seed",
-    "dev:bot": "pnpm --filter @guildpass/discord-bot dev",
-    "start:bot": "pnpm --filter @guildpass/discord-bot start",
-    "register:commands": "pnpm --filter @guildpass/discord-bot register:commands",
-    "dev:docs": "pnpm --filter @guildpass/docs start",
-    "build:docs": "pnpm --filter @guildpass/docs build"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node --import tsx --experimental-test-module-mocks --test test/**/*.test.ts",
+    "test:js": "node --test test/**/*.test.js"
   },
   "engines": {
-    "node": ">=18.17.0"
+    "node": ">=24"
   },
+  "packageManager": "pnpm@11.16.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Adamantine-guild/guildpass-app.git"
@@ -39,13 +26,23 @@
     "url": "https://github.com/Adamantine-guild/guildpass-app/issues"
   },
   "license": "MIT",
+  "dependencies": {
+    "next": "14.2.21",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "^4.5.4"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
     "eslint": "^10.5.0",
-    "typescript-eslint": "^8.61.0"
-  },
-  "dependencies": {
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
     "tsx": "^4.22.4",
-    "zod": "^4.4.3"
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.61.0"
   }
 }
